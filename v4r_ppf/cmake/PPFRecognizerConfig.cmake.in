@@ -1,0 +1,22 @@
+get_filename_component(PPFRecognizer_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
+
+# is there a way of setting cmake min version for processing the final Config file ?
+
+# make sure self defined Find*.cmake scripts can be found
+
+include(CMakeFindDependencyMacro)
+
+## find dependencies for PPFRecognizer::ppf-recognizer target
+find_dependency(Boost REQUIRED)
+find_dependency(PCL REQUIRED)
+include(DefinePCLImportedTarget)
+define_pcl_imported_target()
+find_dependency(glog 0.4.0 REQUIRED)
+find_dependency(OpenMP REQUIRED)
+find_dependency(CMPH REQUIRED)
+
+if(NOT TARGET PPFRecognizer::ppf-recognizer)
+    include("${PPFRecognizer_CMAKE_DIR}/PPFRecognizerTargets.cmake")
+endif()
+
+set(PPFRecognizer_LIBRARIES PPFRecognizer::ppf-recognizer)
