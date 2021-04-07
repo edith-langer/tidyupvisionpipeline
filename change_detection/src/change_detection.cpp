@@ -1,34 +1,6 @@
-#include <Python.h>     //I could not get it running with Python 3.5, use python 2.7
-#include <boost/filesystem.hpp>
-#include <fstream>
-#include <iostream>
-#include <stdlib.h>
-#include <chrono>
-
-#include <pcl/console/parse.h>
-#include <pcl/io/pcd_io.h>
-#include <pcl/common/transforms.h>
-#include <pcl/filters/filter.h>
-#include <pcl/filters/passthrough.h>
-#include <pcl/registration/icp.h>
-#include <pcl/filters/voxel_grid.h>
-#include <pcl/filters/extract_indices.h>
-#include <pcl/segmentation/extract_clusters.h>
-#include <pcl/features/normal_3d.h>
-#include <pcl/search/impl/search.hpp>
-
-#include <boost/program_options.hpp>
-
-#include <v4r/geometry/normals.h>
-
-#include "scene_differencing_points.h"
-#include "extract_objects_using_semantics.h"
-#include "local_object_verification.h"
-#include "object_visualization.h"
-#include "region_growing.h"
-#include "color_histogram.h"
 #include "change_detection.h"
-#include "detected_object.h"
+
+int DetectedObject::s_id = 0;
 
 const float diff_dist = 0.01;
 const float add_crop_static = 0.20; //the amount that should be added to each cluster in the static version when doing the crop

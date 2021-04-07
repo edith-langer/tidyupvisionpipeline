@@ -1,37 +1,4 @@
-#include <iostream>
-#include <regex>
-#include <chrono>
-
-#include <pcl/point_types.h>
-#include <pcl/console/parse.h>
-#include <pcl/common/common.h>
-#include <pcl/io/pcd_io.h>
-#include <pcl/filters/passthrough.h>
-#include <pcl/filters/voxel_grid.h>
-#include <pcl/filters/extract_indices.h>
-#include <pcl/segmentation/extract_clusters.h>
-#include <pcl/segmentation/segment_differences.h>
-#include <pcl/features/normal_3d.h>
-#include <pcl/surface/concave_hull.h>
-
-#include <boost/program_options.hpp>
-#include <glog/logging.h>
-#include <opencv2/imgproc/imgproc.hpp>
-
-#include <v4r/recognition/object_hypothesis.h>
-#include <v4r/common/color_comparison.h>
-#include <v4r/geometry/normals.h>
-
-#include <boost/graph/adjacency_list.hpp>
-#include <boost/graph/graph_utility.hpp>
-#include <boost_graph/maximum_weighted_matching.hpp>
-
-#include <PPFRecognizer.h>
 #include <object_matching.h>
-
-
-
-
 
 Eigen::Vector3f rgb2lab(const Eigen::Vector3i &rgb) {
     cv::Mat rgb_cv (1,1, CV_8UC3);  //this has some information loss because Lab values are also just uchar and not float
@@ -54,9 +21,8 @@ ObjectMatching::ObjectMatching(std::vector<DetectedObject> model_vec, std::vecto
     cfg_path_ = cfg_path;
 }
 
-void ObjectMatching::compute()
+std::vector<Match> ObjectMatching::compute()
 {
-
 
     // setup recognizer options
     //---------------------------------------------------------------------------
@@ -89,7 +55,7 @@ void ObjectMatching::compute()
         po::notify(vm);
     } catch (const po::error &e) {
         std::cerr << "Error: " << e.what() << std::endl << std::endl << desc << std::endl;
-        return false;
+        return {};
     }
 
     if (verbosity >= 0) {
@@ -216,7 +182,7 @@ void ObjectMatching::compute()
             auto object_hyp_iter = std::find_if( global_scene_hypotheses.begin(), global_scene_hypotheses.end(),[obj_id_match](ObjectHypothesesStruct const &o) {return o.object_id == obj_id_match; });
             if (object_hyp_iter == global_scene_hypotheses.end()) {
                 std::cerr << "Wanted to remove a found match from the global hypotheses, but it is not there!? How can that happen?" << std::endl;
-                return -1;
+                return {}; //return empty vector
             }
             int scene_ind = std::distance(global_scene_hypotheses.begin(), object_hyp_iter);
             std::vector<v4r::ObjectHypothesesGroup>& hg = global_scene_hypotheses[scene_ind].hypotheses;
@@ -291,12 +257,12 @@ void ObjectMatching::compute()
     }
     model_obj_matches.erase(std::remove_if(model_obj_matches.begin(),model_obj_matches.end(), [&ppf_params](const auto &a){ return a.confidence < ppf_params.min_result_conf_thr_ ; }), model_obj_matches.end());
 
-    results.push_back(result);
-
     std::cout << "Time spent to recognize objects with PPF: " << (ppf_rec_time_sum/1000) << " seconds." << std::endl;
+
+    return model_obj_matches;
 }
 
-std::vector<Match> weightedGraphMatching(std::vector<ObjectHypothesesStruct> global_hypotheses) {
+std::vector<Match> ObjectMatching::weightedGraphMatching(std::vector<ObjectHypothesesStruct> global_hypotheses) {
 
     boost::graph_traits< my_graph >::vertex_iterator vi, vi_end;
 
@@ -305,14 +271,14 @@ std::vector<Match> weightedGraphMatching(std::vector<ObjectHypothesesStruct> glo
     std::map<std::string, vertex_t> modelToVertex;
 
     for (size_t o = 0; o < global_hypotheses.size(); o++) {
-        std::string obj_vert_name= std::to_string(global_hypotheses[o].object_id); //make sure the vertex identifier is different from the model identifier (e.g. 2_mug)
+        std::string obj_vert_name= std::to_string(global_hypotheses[o].object_id)+"_object"; //make sure the vertex identifier is different from the model identifier (e.g. 2_mug)
 
         auto obj_vertex = boost::add_vertex(VertexProperty(obj_vert_name),g);
 
         for (size_t h = 0; h < global_hypotheses[o].hypotheses.size(); h++) {
             const v4r::ObjectHypothesesGroup &obj_hypothesis = global_hypotheses[o].hypotheses[h];
             const v4r::ObjectHypothesis::Ptr &model_h = obj_hypothesis.ohs_[0];
-            std::string model_vert_name = model_h->model_id_;
+            std::string model_vert_name = model_h->model_id_+"_model";
             vertex_t model_vertex;
             if (modelToVertex.find(model_vert_name) == modelToVertex.end()) { //insert vertex into graph
                 model_vertex = boost::add_vertex(VertexProperty(model_vert_name),g);
@@ -322,7 +288,8 @@ std::vector<Match> weightedGraphMatching(std::vector<ObjectHypothesesStruct> glo
             }
             //boost::add_edge(o, model_uid, EdgeProperty(model_h->confidence_), g);
             float ampl_weight = model_h->confidence_ * model_h->confidence_;
-            boost::add_edge(obj_vertex, model_vertex, EdgeProperty(ampl_weight), g);
+            Eigen::Matrix4f transformation = model_h->pose_refinement_ * model_h->transform_;
+            boost::add_edge(obj_vertex, model_vertex, EdgeProperty(ampl_weight, transformation), g); //edge with confidence and transformation between model and object
         }
     }
 
@@ -335,14 +302,17 @@ std::vector<Match> weightedGraphMatching(std::vector<ObjectHypothesesStruct> glo
     for (boost::tie(vi, vi_end) = vertices(g); vi != vi_end; ++vi) {
         if (mate[*vi] != boost::graph_traits< my_graph >::null_vertex()
                 && boost::algorithm::contains(g[*vi].name, "model")) {//*vi < mate1[*vi]) {
-            auto ed = boost::edge(*vi, mate[*vi], g);
+            auto ed = boost::edge(*vi, mate[*vi], g); //returns pair<edge_descriptor, bool>, where bool indicates if edge exists or not
             float edge_weight = boost::get(boost::edge_weight_t(), g, ed.first);
+            Eigen::Matrix4f edge_transformation = boost::get(transformation_t(), g, ed.first);
             std::cout << "{" << g[*vi].name << ", " << g[mate[*vi]].name << "} - " << edge_weight << std::endl;
 
-            int m_id, o_id; std::string m_name, o_name;
-            splitIDandName(g[*vi].name, m_id, m_name);
-            splitIDandName(g[mate[*vi]].name, o_id, o_name);
-            Match m(m_id, o_id, std::sqrt(edge_weight)); //de-amplify
+            //remove "_model" and "_object from the IDs (we added that before to be able to distinguish the nodes in the graph
+            std::string m_name = g[*vi].name;
+            std::string o_name = g[mate[*vi]].name;
+            m_name.erase(m_name.length()-6, 6); //erase _model
+            o_name.erase(o_name.length()-7, 7); //erase _object
+            Match m(std::stoi(m_name), std::stoi(o_name), std::sqrt(edge_weight), edge_transformation); //de-amplify
             model_obj_match.push_back(m);
         }
     }
@@ -353,7 +323,7 @@ std::vector<Match> weightedGraphMatching(std::vector<ObjectHypothesesStruct> glo
 //check if hypothesis is below floor (in hypotheses_verification.cpp a method exists using the convex hull)
 //compute the z_value_threshold from the supporting plane
 //checking for flying objects would not allow to keep true match of stacked objects
-bool isModelBelowPlane(pcl::PointCloud<PointNormal>::Ptr model, pcl::PointCloud<PointNormal>::Ptr plane_cloud) {
+bool ObjectMatching::isModelBelowPlane(pcl::PointCloud<PointNormal>::Ptr model, pcl::PointCloud<PointNormal>::Ptr plane_cloud) {
 
     PointNormal minPoint, maxPoint;
     pcl::getMinMax3D(*model, minPoint, maxPoint);
@@ -399,7 +369,7 @@ bool isModelBelowPlane(pcl::PointCloud<PointNormal>::Ptr model, pcl::PointCloud<
 
 
 
-std::tuple<float,float> computeModelFitness(pcl::PointCloud<PointNormal>::Ptr object, pcl::PointCloud<PointNormal>::Ptr model,
+std::tuple<float,float> ObjectMatching::computeModelFitness(pcl::PointCloud<PointNormal>::Ptr object, pcl::PointCloud<PointNormal>::Ptr model,
                                             v4r::apps::PPFRecognizerParameter param) {
     std::vector<v4r::ModelSceneCorrespondence> model_object_c;
 
@@ -493,7 +463,7 @@ std::tuple<float,float> computeModelFitness(pcl::PointCloud<PointNormal>::Ptr ob
     return std::make_tuple(object_confidence,model_confidence);
 }
 
-void saveCloudResults(pcl::PointCloud<PointNormal>::Ptr object_cloud, pcl::PointCloud<PointNormal>::Ptr model_aligned,
+void ObjectMatching::saveCloudResults(pcl::PointCloud<PointNormal>::Ptr object_cloud, pcl::PointCloud<PointNormal>::Ptr model_aligned,
                       pcl::PointCloud<PointNormal>::Ptr model_aligned_refined, std::string path) {
 
     //assign the matched model another label for better visualization

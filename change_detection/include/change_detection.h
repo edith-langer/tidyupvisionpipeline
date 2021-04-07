@@ -1,17 +1,36 @@
 #ifndef CHANGE_DETECTION_H
 #define CHANGE_DETECTION_H
 
+#include <fstream>
+#include <iostream>
+#include <stdlib.h>
+#include <chrono>
+
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl/PointIndices.h>
+#include <pcl/io/pcd_io.h>
+#include <pcl/common/transforms.h>
+#include <pcl/filters/filter.h>
+#include <pcl/filters/passthrough.h>
+#include <pcl/filters/voxel_grid.h>
+#include <pcl/filters/extract_indices.h>
+#include <pcl/segmentation/extract_clusters.h>
+#include <pcl/search/impl/search.hpp>
 
-#include <pcl/registration/warp_point_rigid_3d.h>
-#include <pcl/registration/icp.h>
-#include <pcl/registration/transformation_estimation_lm.h>
+#include <boost/filesystem.hpp>
 
-#include "plane_object_extraction.h"
-#include "warp_point_rigid_4d.h"
+#include <v4r/geometry/normals.h>
+
 #include "scene_differencing_points.h"
+#include "extract_objects_using_semantics.h"
+#include "local_object_verification.h"
+#include "object_visualization.h"
+#include "region_growing.h"
+#include "color_histogram.h"
+#include "detected_object.h"
+#include "object_matching.h"
+#include "plane_object_extraction.h"
 #include "color_histogram.h"
 
 typedef pcl::PointXYZRGBNormal PointNormal;
