@@ -51,13 +51,14 @@ bool readInput(std::string input_path, const pcl::PointCloud<PointNormal>::Ptr &
 int main(int argc, char* argv[])
 {
     /// Check arguments and print info
-    if (argc < 3) {
+    if (argc < 4) {
         pcl::console::print_info("\n\
                                  -- Object change detection based on reconstructions of a plane of interest at two different timestamps -- : \n\
                                  \n\
                                  Syntax: %s reference_plane  current_plane \n\
                                  [Options] \n\
-                                 -r path, where results should be stored, a folder with date and time gets created there ",
+                                 -r path, where results should be stored, a folder with date and time gets created there \n\
+                                 -c config path for ppf params",
                                  argv[0]);
         return(1);
     }
@@ -66,7 +67,9 @@ int main(int argc, char* argv[])
     std::string reference_path = argv[1];
     std::string current_path = argv[2];
     std::string result_path="";
+    std::string ppf_config_path_path="";
     pcl::console::parse(argc, argv, "-r", result_path);
+    pcl::console::parse(argc, argv, "-c", ppf_config_path_path);
 
     //----------------------------setup result folder----------------------------------
     std::string timestamp = getCurrentTime();
@@ -108,8 +111,9 @@ int main(int argc, char* argv[])
     std::vector<pcl::PointXYZ> ref_convex_hull_pts;
 
 
-    ChangeDetectionResult ref_result, curr_result;
-    ChangeDetection change_detection(ref_cloud, curr_cloud, ref_plane_coeffs, curr_plane_coeffs, ref_convex_hull_pts, curr_convex_hull_pts, result_path);
+    std::vector<DetectedObject> ref_result, curr_result;
+    ChangeDetection change_detection(ppf_config_path_path);
+    change_detection.init(ref_cloud, curr_cloud, ref_plane_coeffs, curr_plane_coeffs, ref_convex_hull_pts, curr_convex_hull_pts, result_path);
     change_detection.compute(ref_result, curr_result);
 }
 

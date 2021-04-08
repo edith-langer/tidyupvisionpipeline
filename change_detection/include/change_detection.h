@@ -36,25 +36,16 @@
 typedef pcl::PointXYZRGBNormal PointNormal;
 typedef pcl::PointXYZRGBL PointLabel;
 
-struct ChangeDetectionResult {
-    std::vector<std::vector<int> > new_objects;
-    std::vector<std::vector<int> > removed_objects;
-    std::vector<std::vector<int> > static_objects;
-    std::vector<std::vector<int> > displaced_objects;
-};
-
 
 class ChangeDetection
 {
 public:
-    ChangeDetection(pcl::PointCloud<PointNormal>::Ptr ref_cloud, pcl::PointCloud<PointNormal>::Ptr curr_cloud,
-                    Eigen::Vector4f ref_plane_coeffs, Eigen::Vector4f curr_plane_coeffs,
-                    std::vector<pcl::PointXYZ> ref_convex_hull_pts, std::vector<pcl::PointXYZ> curr_convex_hull_pts,
-                    std::string output_path = "") :
-        ref_cloud_(ref_cloud), curr_cloud_(curr_cloud), ref_plane_coeffs_(ref_plane_coeffs),
-        curr_plane_coeffs_(curr_plane_coeffs),  curr_convex_hull_pts_(curr_convex_hull_pts),
-        ref_convex_hull_pts_(ref_convex_hull_pts),output_path_(output_path) {}
+    ChangeDetection(std::string ppf_config_path) : ppf_config_path_(ppf_config_path) {}
 
+    void init(pcl::PointCloud<PointNormal>::Ptr ref_cloud, pcl::PointCloud<PointNormal>::Ptr curr_cloud,
+              Eigen::Vector4f ref_plane_coeffs, Eigen::Vector4f curr_plane_coeffs,
+              std::vector<pcl::PointXYZ> ref_convex_hull_pts, std::vector<pcl::PointXYZ> curr_convex_hull_pts,
+              std::string output_path = "");
 
     void setOutputPath (std::string output_path) {
         output_path_ = output_path;
@@ -68,10 +59,12 @@ public:
         this->curr_cloud_ = cloud;
     }
 
-    void compute(ChangeDetectionResult& ref_result, ChangeDetectionResult& curr_result);
+    void compute(std::vector<DetectedObject> &ref_result, std::vector<DetectedObject> &curr_result);
 
 private:
-    std::string object_store_path_; //the model objects and their ppf model get stored here
+    //std::string object_store_path_; //the model objects and their ppf model get stored here --> for now we store everything in output path
+    std::string ppf_config_path_; //the config file that stores the parrameters for PPF
+    std::string output_path_; //all debugging things will get stored there (+model objects and their ppf model)
 
     std::vector<PlaneWithObjInd> potential_objects_;
     pcl::PointCloud<PointNormal>::Ptr ref_cloud_;
@@ -81,8 +74,6 @@ private:
     Eigen::Vector4f curr_plane_coeffs_;
     std::vector<pcl::PointXYZ> curr_convex_hull_pts_;
     std::vector<pcl::PointXYZ> ref_convex_hull_pts_;
-
-    std::string output_path_;
 
     bool do_LV_before_matching = false;
 
