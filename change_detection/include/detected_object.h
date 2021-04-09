@@ -9,7 +9,18 @@
 
 typedef pcl::PointXYZRGBNormal PointNormal;
 
+const float max_dist_for_being_static = 0.1; //how much can the object be displaced to still count as static
+
 enum ObjectState {NEW, REMOVED, DISPLACED, STATIC, UNKNOWN};
+
+struct Match {
+    int model_id;
+    int object_id;
+    float confidence;
+    Eigen::Matrix4f transform;
+    Match() {model_id = -1; object_id = -1, confidence = -1; transform = Eigen::Matrix4f::Identity();}
+    Match(int m_id, int o_id, float conf, Eigen::Matrix4f t) {model_id = m_id; object_id = o_id; confidence = conf; transform = t;}
+};
 
 struct DetectedObject {
 protected:
@@ -25,6 +36,7 @@ public:
     PlaneStruct supp_plane_;
     std::string object_folder_path_;
     ObjectState state_;
+    Match match_; //this is only relevant for displaced objects
 
     int getID() {return unique_id_;}
     

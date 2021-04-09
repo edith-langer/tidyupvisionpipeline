@@ -65,15 +65,6 @@ typedef boost::adjacency_list< boost::vecS, boost::vecS, boost::undirectedS, Ver
 using vertex_t = boost::graph_traits<my_graph>::vertex_descriptor;
 using edge_t   = boost::graph_traits<my_graph>::edge_descriptor;
 
-//result defs
-struct Match {
-    int model_id;
-    int object_id;
-    float confidence;
-    Eigen::Matrix4f transform;
-    Match(int m_id, int o_id, float conf, Eigen::Matrix4f t) {model_id = m_id; object_id = o_id; confidence = conf; transform = t;}
-};
-
 
 struct ObjectHypothesesStruct {
     int object_id;
@@ -88,7 +79,7 @@ public:
     ObjectMatching(std::vector<DetectedObject> model_vec, std::vector<DetectedObject> object_vec,
                    std::string model_path, std::string cfg_path);
 
-    std::vector<Match> compute();
+    std::vector<Match> compute(std::vector<DetectedObject> &ref_result, std::vector<DetectedObject> &curr_result);
 
 private:
     std::vector<DetectedObject> model_vec_;

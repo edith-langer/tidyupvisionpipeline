@@ -2,7 +2,6 @@
 
 int DetectedObject::s_id = 0;
 
-float max_dist_for_being_static = 0.1; //how much can the object be displaced to still count as static
 
 const float diff_dist = 0.01;
 const float add_crop_static = 0.20; //the amount that should be added to each cluster in the static version when doing the crop
@@ -244,131 +243,12 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
         return;
     }
 
-    std::map<int, DetectedObject> ref_obj_map;
-    std::map<int, DetectedObject> curr_obj_map;
-    for (DetectedObject ro : ref_objects_vec) {
-        ref_obj_map.insert(std::make_pair(ro.getID(), ro));
-    }
-    for (DetectedObject co : curr_objects_vec) {
-        curr_obj_map.insert(std::make_pair(co.getID(), co));
-    }
 
     //matches between same plane different timestamps
     //TODO different code if LV was performed
     ObjectMatching object_matching(ref_objects_vec, curr_objects_vec, model_path, ppf_config_path_);
-    std::vector<Match> matches = object_matching.compute();
+    std::vector<Match> matches = object_matching.compute(ref_result, curr_result);
 
-    for (DetectedObject &ro : ref_objects_vec) {
-        auto m_iter = std::find_if( matches.begin(), matches.end(),[&ro](Match const &m) {return m.model_id == ro.getID(); });
-        //ref object was not matched --> removed or displaced on other plane
-        if (m_iter == matches.end()) {
-            ro.state_ = ObjectState::REMOVED;
-            ref_result.push_back(ro);
-        }
-        //a match was found
-        //was it a partial match? was it displaced or static?
-        else {
-            //compute distance between object and model
-            Eigen::Vector3f translation(m_iter->transform(0,3), m_iter->transform(1,3), m_iter->transform(2,3));
-            float dist = translation.norm();
-            bool is_static = dist < max_dist_for_being_static;
-
-            //get the original model and object clouds for the  match
-            int obj_id = m_iter->object_id;
-            DetectedObject &co = curr_obj_map.at(obj_id);
-            const pcl::PointCloud<PointNormal>::Ptr model_cloud = ro.object_cloud_;
-            const pcl::PointCloud<PointNormal>::Ptr object_cloud = co.object_cloud_;
-            pcl::PointCloud<PointNormal>::Ptr model_aligned(new pcl::PointCloud<PointNormal>());
-
-            pcl::transformPointCloudWithNormals(*model_cloud, *model_aligned, m_iter->transform);
-
-            //remove points from MODEL object input cloud
-            SceneDifferencingPoints scene_diff(0.02);
-            std::vector<int> diff_ind;
-            std::vector<int> corresponding_ind;
-            SceneDifferencingPoints::Cloud::Ptr model_diff_cloud = scene_diff.computeDifference(model_aligned, object_cloud, diff_ind, corresponding_ind);
-
-            if (diff_ind.size() < 100) { //if less than 100 points left, we do not split the model object
-                if (is_static) {
-                    ro.state_ = ObjectState::STATIC;
-                } else {
-                    ro.state_ = ObjectState::DISPLACED;
-                }
-                ref_result.push_back(ro);
-            }
-            //split the model cloud
-            else {
-                //the part that is matched
-                pcl::PointCloud<PointNormal>::Ptr matched_model_part(new pcl::PointCloud<PointNormal>);
-                pcl::ExtractIndices<PointNormal> extract;
-                extract.setInputCloud (model_aligned);
-                pcl::PointIndices::Ptr c_ind(new pcl::PointIndices());
-                c_ind->indices = corresponding_ind;
-                extract.setIndices(c_ind);
-                extract.setKeepOrganized(false);
-                extract.setNegative (false);
-                extract.filter(*matched_model_part);
-                DetectedObject model_part(matched_model_part, ro.plane_cloud_, ro.supp_plane_, (is_static ? ObjectState::STATIC : ObjectState::DISPLACED), "");
-                ref_result.push_back((model_part));
-
-                //the remaining part of the model
-                ro.object_cloud_=model_diff_cloud;
-                ro.state_ = ObjectState::REMOVED;
-                ro.object_folder_path_="";
-            }
-
-            //remove points from OBJECT object input cloud
-            pcl::PointCloud<PointNormal>::Ptr object_diff_cloud = scene_diff.computeDifference(object_cloud, model_aligned, diff_ind, corresponding_ind);
-
-            if (diff_ind.size() < 100) { //if less than 100 points left, we do not split the object
-                if (is_static) {
-                    co.state_ = ObjectState::STATIC;
-                } else {
-                    co.state_ = ObjectState::DISPLACED;
-                }
-                ref_result.push_back(co);
-            }
-            //split the object cloud
-            else {
-                //the part that is matched
-                pcl::PointCloud<PointNormal>::Ptr matched_object_part(new pcl::PointCloud<PointNormal>);
-                pcl::ExtractIndices<PointNormal> extract;
-                pcl::PointIndices::Ptr c_ind(new pcl::PointIndices());
-                extract.setInputCloud (object_cloud);
-                c_ind->indices = corresponding_ind;
-                extract.setIndices(c_ind);
-                extract.setKeepOrganized(false);
-                extract.setNegative (false);
-                extract.filter(*matched_object_part);
-                DetectedObject object_part(matched_object_part, co.plane_cloud_, co.supp_plane_, (is_static ? ObjectState::STATIC : ObjectState::DISPLACED), "");
-                curr_result.push_back(object_part);
-
-                //the remaining part of the object
-                co.object_cloud_=object_diff_cloud;
-                co.object_folder_path_="";
-            }
-        }
-    }
-
-    //set all unmatched current objects to NEW
-    for (DetectedObject &co : curr_objects_vec) {
-        auto m_iter = std::find_if( matches.begin(), matches.end(),[&co](Match const &m) {return m.model_id == co.getID(); });
-        //curr object was not matched --> new or displaced on other plane
-        if (m_iter == matches.end() || co.state_ == ObjectState::UNKNOWN) {
-            co.state_ = ObjectState::NEW;
-            curr_result.push_back(co);
-        }
-    }
-
-    //set all unmatched ref objects to REMOVED (this happens for the remaining part when a partial match was detected)
-    for (DetectedObject &ro : ref_objects_vec) {
-        auto m_iter = std::find_if( matches.begin(), matches.end(),[&ro](Match const &m) {return m.model_id == ro.getID(); });
-        //curr object was not matched --> new or displaced on other plane
-        if (m_iter == matches.end() || ro.state_ == ObjectState::UNKNOWN) {
-            ro.state_ = ObjectState::REMOVED;
-            ref_result.push_back(ro);
-        }
-    }
 
 
     //Visualize two clouds next to each other. Reference cloud showing disappeared objects.

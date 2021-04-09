@@ -10,12 +10,16 @@
 
 #include "change_detection.h"
 
-
-
 typedef pcl::PointXYZRGBNormal PointNormal;
 typedef pcl::PointXYZRGB PointRGB;
 typedef pcl::PointXYZRGBL PointLabel;
 
+std::vector<DetectedObject> new_obj;
+std::vector<DetectedObject> removed_obj;
+std::vector<DetectedObject> pot_new_obj;
+std::vector<DetectedObject> pot_removed_obj;
+std::vector<DetectedObject> ref_displaced_obj;
+std::vector<DetectedObject> curr_displaced_obj;
 
 std::string getCurrentTime() {
     time_t rawtime = time(nullptr);
@@ -115,6 +119,58 @@ int main(int argc, char* argv[])
     ChangeDetection change_detection(ppf_config_path_path);
     change_detection.init(ref_cloud, curr_cloud, ref_plane_coeffs, curr_plane_coeffs, ref_convex_hull_pts, curr_convex_hull_pts, result_path);
     change_detection.compute(ref_result, curr_result);
+
+    //all detected objects labeled as removed (ref_objects) or new (curr_objects) could be placed on another plane
+    for (DetectedObject ro : ref_result) {
+        if (ro.state_ == ObjectState::REMOVED) {
+            pot_removed_obj.push_back(ro);
+            //means that there was a partial match and a new ppf-model is needed
+            if (ro.object_folder_path_ == "") {
+                //there should already exist a folder
+                std::string orig_path = result_path + "/model_objects/" + std::to_string(ro.getID());
+                if (boost::filesystem::exists(orig_path)) {
+                    boost::filesystem::rename(orig_path, orig_path+"_partial_match");
+                }
+                boost::filesystem::create_directories(orig_path);
+                pcl::io::savePCDFile(orig_path + "/3D_model.pcd", *ro.object_cloud_); //PPF will create a new model with the new cloud
+            }
+        } else if (ro.state_ == ObjectState::DISPLACED) {
+            ref_displaced_obj.push_back(ro);
+        } //the state STATIC can be ignored
+    }
+    for (DetectedObject co : curr_result) {
+        if (co.state_ == ObjectState::NEW) {
+            pot_new_obj.push_back(co);
+        } else if (co.state_ == ObjectState::DISPLACED) {
+            curr_displaced_obj.push_back(co);
+        } //the state STATIC can be ignored
+    }
+
+    //TODO do that for several planes
+
+    //after collecting potential new and removed objects from all planes, try to match them
+    ObjectMatching matching(pot_removed_obj, pot_new_obj, result_path + "/model_objects/", ppf_config_path_path);
+    ref_result.clear(); curr_result.clear();
+    matching.compute(ref_result, curr_result);
+    for (DetectedObject ro : ref_result) {
+        if (ro.state_ == ObjectState::REMOVED) {
+            removed_obj.push_back(ro);
+        } else if (ro.state_ == ObjectState::DISPLACED) {
+            ref_displaced_obj.push_back(ro);
+        } //the state STATIC can be ignored
+    }
+    for (DetectedObject co : curr_result) {
+        if (co.state_ == ObjectState::NEW) {
+            new_obj.push_back(co);
+        } else if (co.state_ == ObjectState::DISPLACED) {
+            curr_displaced_obj.push_back(co);
+        } //the state STATIC can be ignored
+    }
+
+    //visualization
+    //put all planes together in one pcd-file as reference
+    //copy the fused cloud and add colored points from detected objects (e.g. removed ones red, new ones green, and displaced ones r and g random and b high number)
+
 }
 
 
