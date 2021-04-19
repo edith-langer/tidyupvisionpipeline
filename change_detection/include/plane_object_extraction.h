@@ -57,7 +57,7 @@ struct PlaneWithObjInd {
 
 class ExtractObjectsFromPlanes {
 public:
-    ExtractObjectsFromPlanes(pcl::PointCloud<PointNormal>::Ptr cloud, Eigen::Vector4f main_plane_coeffs, std::vector<pcl::PointXYZ> convex_hull_pts, std::string output_path="");
+    ExtractObjectsFromPlanes(pcl::PointCloud<PointNormal>::Ptr cloud, Eigen::Vector4f main_plane_coeffs, pcl::PointCloud<pcl::PointXYZ>::Ptr convex_hull_pts, std::string output_path="");
     ~ExtractObjectsFromPlanes();
 
     void setResultPath(std::string path);
@@ -68,7 +68,7 @@ public:
 private:
     pcl::PointCloud<PointNormal>::Ptr orig_cloud_;
     Eigen::Vector4f main_plane_coeffs_;
-    std::vector<pcl::PointXYZ> convex_hull_pts_;
+    pcl::PointCloud<pcl::PointXYZ>::Ptr convex_hull_pts_;
     std::string result_path_;
     std::vector<PlaneStruct> hor_planes_;
 

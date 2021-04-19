@@ -1,3 +1,13 @@
+/**
+  NOTES:
+  -- if Eigen version < 3.3.6 comment line 277 and 278 in Eigen/src/Core/Matrix.h
+        Base::_check_template_params();
+        //if (RowsAtCompileTime!=Dynamic && ColsAtCompileTime!=Dynamic)
+        //  Base::_set_noalias(other);
+**/
+
+
+
 #include <boost/filesystem.hpp>
 #include <fstream>
 #include <iostream>
@@ -20,6 +30,17 @@ std::vector<DetectedObject> pot_new_obj;
 std::vector<DetectedObject> pot_removed_obj;
 std::vector<DetectedObject> ref_displaced_obj;
 std::vector<DetectedObject> curr_displaced_obj;
+
+template <typename DetectedObject>
+ostream& operator<<(ostream& output, std::vector<DetectedObject> const& values)
+{
+    for (auto const & value : values)
+    {
+        const int &id =  value.getID();
+        output << id << " ";
+    }
+    return output;
+}
 
 std::string getCurrentTime() {
     time_t rawtime = time(nullptr);
@@ -77,7 +98,7 @@ int main(int argc, char* argv[])
 
     //----------------------------setup result folder----------------------------------
     std::string timestamp = getCurrentTime();
-    result_path =  result_path + timestamp;
+    result_path =  result_path + "/" + timestamp;
     boost::filesystem::create_directories(result_path);
 
     /// Input: Two reconstructed POI in map frame with RGB, Normals and Lables (?), coefficients of the plane/plane points
@@ -108,16 +129,19 @@ int main(int argc, char* argv[])
     pcl::io::savePCDFile(result_path + "/ref_cloud.pcd", *ref_cloud);
     pcl::io::savePCDFile(result_path + "/curr_cloud.pcd", *curr_cloud);
 
-    //Read plane coeffs and convex hull points from DB
-    Eigen::Vector4f curr_plane_coeffs;
-    Eigen::Vector4f ref_plane_coeffs;
-    std::vector<pcl::PointXYZ> curr_convex_hull_pts;
-    std::vector<pcl::PointXYZ> ref_convex_hull_pts;
-
+    //TODO Read plane coeffs and convex hull points from DB
+    Eigen::Vector4f curr_plane_coeffs(-0.00958200544119, 0.00314281438477, 0.999949157238, -0.41155308485);
+    Eigen::Vector4f ref_plane_coeffs(-0.00958200544119, 0.00314281438477, 0.999949157238, -0.41155308485);
+    //std::vector<pcl::PointXYZ> curr_convex_hull_pts;
+    //std::vector<pcl::PointXYZ> ref_convex_hull_pts;
+    pcl::PointCloud<pcl::PointXYZ>::Ptr curr_hull_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr ref_hull_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::io::loadPCDFile("/home/edith/test_data_MarkusLeitner/table_test_data/table_hull.pcd", *curr_hull_cloud);
+    pcl::copyPointCloud(*curr_hull_cloud, *ref_hull_cloud);
 
     std::vector<DetectedObject> ref_result, curr_result;
     ChangeDetection change_detection(ppf_config_path_path);
-    change_detection.init(ref_cloud, curr_cloud, ref_plane_coeffs, curr_plane_coeffs, ref_convex_hull_pts, curr_convex_hull_pts, result_path);
+    change_detection.init(ref_cloud, curr_cloud, ref_plane_coeffs, curr_plane_coeffs, curr_hull_cloud, ref_hull_cloud, result_path);
     change_detection.compute(ref_result, curr_result);
 
     //all detected objects labeled as removed (ref_objects) or new (curr_objects) could be placed on another plane
@@ -149,23 +173,35 @@ int main(int argc, char* argv[])
     //TODO do that for several planes
 
     //after collecting potential new and removed objects from all planes, try to match them
-    ObjectMatching matching(pot_removed_obj, pot_new_obj, result_path + "/model_objects/", ppf_config_path_path);
-    ref_result.clear(); curr_result.clear();
-    matching.compute(ref_result, curr_result);
-    for (DetectedObject ro : ref_result) {
-        if (ro.state_ == ObjectState::REMOVED) {
-            removed_obj.push_back(ro);
-        } else if (ro.state_ == ObjectState::DISPLACED) {
-            ref_displaced_obj.push_back(ro);
-        } //the state STATIC can be ignored
+    if (pot_removed_obj.size() != 0 && pot_new_obj.size() != 0) {
+        ObjectMatching matching(pot_removed_obj, pot_new_obj, result_path + "/model_objects/", ppf_config_path_path);
+        ref_result.clear(); curr_result.clear();
+        matching.compute(ref_result, curr_result);
+        for (DetectedObject ro : ref_result) {
+            if (ro.state_ == ObjectState::REMOVED) {
+                removed_obj.push_back(ro);
+            } else if (ro.state_ == ObjectState::DISPLACED) {
+                ref_displaced_obj.push_back(ro);
+            } //the state STATIC can be ignored
+        }
+        for (DetectedObject co : curr_result) {
+            if (co.state_ == ObjectState::NEW) {
+                new_obj.push_back(co);
+            } else if (co.state_ == ObjectState::DISPLACED) {
+                curr_displaced_obj.push_back(co);
+            } //the state STATIC can be ignored
+        }
+    } else {
+        //one of them is empty
+        removed_obj.insert(removed_obj.end(), pot_removed_obj.begin(), pot_removed_obj.end());
+        new_obj.insert(new_obj.end(), pot_new_obj.begin(), pot_new_obj.end());
     }
-    for (DetectedObject co : curr_result) {
-        if (co.state_ == ObjectState::NEW) {
-            new_obj.push_back(co);
-        } else if (co.state_ == ObjectState::DISPLACED) {
-            curr_displaced_obj.push_back(co);
-        } //the state STATIC can be ignored
-    }
+
+    std::cout << "FINAL RESULT" << std::endl;
+    std::cout << "Removed objects: " << removed_obj << std::endl;
+    std::cout << "New objects: " << new_obj << std::endl;
+    std::cout << "Displaced objects in reference: " << ref_displaced_obj << std::endl;
+    std::cout << "Displaced objects in current: " << curr_displaced_obj << std::endl;
 
     //visualization
     //put all planes together in one pcd-file as reference

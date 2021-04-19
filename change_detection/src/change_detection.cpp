@@ -29,7 +29,7 @@ bool comparePoint(std::pair<PointNormal, int> p1, std::pair<PointNormal, int> p2
 
 void ChangeDetection::init(pcl::PointCloud<PointNormal>::Ptr ref_cloud, pcl::PointCloud<PointNormal>::Ptr curr_cloud,
                            Eigen::Vector4f ref_plane_coeffs, Eigen::Vector4f curr_plane_coeffs,
-                           std::vector<pcl::PointXYZ> ref_convex_hull_pts, std::vector<pcl::PointXYZ> curr_convex_hull_pts,
+                           pcl::PointCloud<pcl::PointXYZ>::Ptr ref_convex_hull_pts, pcl::PointCloud<pcl::PointXYZ>::Ptr curr_convex_hull_pts,
                            std::string output_path) {
     ref_cloud_= ref_cloud;
     curr_cloud_ = curr_cloud;
@@ -705,11 +705,26 @@ void ChangeDetection::refineNormals(pcl::PointCloud<PointNormal>::Ptr object_clo
 //removes small clusters from input cloud and returns all valid clusters
 std::vector<pcl::PointIndices> ChangeDetection::cleanResult(pcl::PointCloud<PointNormal>::Ptr cloud, float cluster_thr) {
     //clean up small things
+    std::vector<pcl::PointIndices> cluster_indices;
+    if (cloud->empty()) {
+        return cluster_indices;
+    }
+    //check if cloud only consists of nans
+    std::vector<int> nan_ind;
+    pcl::PointCloud<PointNormal>::Ptr no_nans_cloud(new pcl::PointCloud<PointNormal>);
+    cloud->is_dense = false;
+    pcl::removeNaNFromPointCloud(*cloud, *no_nans_cloud, nan_ind);
+    if (no_nans_cloud->size() == 0) {
+        return cluster_indices;
+    }
+    if (no_nans_cloud->size() == cloud->size())
+        cloud->is_dense = true;
+
+
     pcl::search::KdTree<PointNormal>::Ptr tree (new pcl::search::KdTree<PointNormal>);
     tree->setInputCloud (cloud);
 
     pcl::EuclideanClusterExtraction<PointNormal> ec;
-    std::vector<pcl::PointIndices> cluster_indices;
     ec.setClusterTolerance (cluster_thr);
     ec.setMinClusterSize (15);
     ec.setMaxClusterSize (std::numeric_limits<int>::max());

@@ -93,6 +93,7 @@ private:
                           pcl::PointCloud<PointNormal>::Ptr model_aligned_refined, std::string path);
     bool isModelBelowPlane(pcl::PointCloud<PointNormal>::Ptr model, pcl::PointCloud<PointNormal>::Ptr plane_cloud);
     std::vector<Match> weightedGraphMatching(std::vector<ObjectHypothesesStruct> global_hypotheses);
+    float computeDistance(const pcl::PointCloud<PointNormal>::Ptr object_cloud, const pcl::PointCloud<PointNormal>::Ptr model_cloud, const Eigen::Matrix4f transform);
 };
 
 #endif // OBJECT_MATCHING_H

@@ -44,7 +44,7 @@ public:
 
     void init(pcl::PointCloud<PointNormal>::Ptr ref_cloud, pcl::PointCloud<PointNormal>::Ptr curr_cloud,
               Eigen::Vector4f ref_plane_coeffs, Eigen::Vector4f curr_plane_coeffs,
-              std::vector<pcl::PointXYZ> ref_convex_hull_pts, std::vector<pcl::PointXYZ> curr_convex_hull_pts,
+              pcl::PointCloud<pcl::PointXYZ>::Ptr ref_convex_hull_pts, pcl::PointCloud<pcl::PointXYZ>::Ptr curr_convex_hull_pts,
               std::string output_path = "");
 
     void setOutputPath (std::string output_path) {
@@ -72,8 +72,8 @@ private:
 
     Eigen::Vector4f ref_plane_coeffs_;
     Eigen::Vector4f curr_plane_coeffs_;
-    std::vector<pcl::PointXYZ> curr_convex_hull_pts_;
-    std::vector<pcl::PointXYZ> ref_convex_hull_pts_;
+    pcl::PointCloud<pcl::PointXYZ>::Ptr curr_convex_hull_pts_;
+    pcl::PointCloud<pcl::PointXYZ>::Ptr ref_convex_hull_pts_;
 
     bool do_LV_before_matching = false;
 
