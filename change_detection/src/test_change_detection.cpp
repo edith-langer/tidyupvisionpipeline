@@ -153,8 +153,17 @@ int main(int argc, char* argv[])
                 //there should already exist a folder
                 std::string orig_path = result_path + "/model_objects/" + std::to_string(ro.getID());
                 if (boost::filesystem::exists(orig_path)) {
-                    boost::filesystem::rename(orig_path, orig_path+"_partial_match");
+                    boost::filesystem::path dest_folder = result_path + "/model_objects_matched/" + std::to_string(ro.getID());
+                    boost::filesystem::create_directories(dest_folder);
+                    //copy the folder to another directory. The model is already matched and should not be used anymore
+                    for (const auto& dirEnt : boost::filesystem::recursive_directory_iterator{orig_path})
+                        {
+                            const auto& path = dirEnt.path();
+                            boost::filesystem::copy(path, dest_folder / path.filename());
+                            std::cout << "Copy " << path << " to " << (dest_folder / path.filename()) << std::endl;
+                        }
                 }
+                boost::filesystem::remove_all(orig_path);
                 boost::filesystem::create_directories(orig_path);
                 pcl::io::savePCDFile(orig_path + "/3D_model.pcd", *ro.object_cloud_); //PPF will create a new model with the new cloud
             }
@@ -203,9 +212,12 @@ int main(int argc, char* argv[])
     std::cout << "Displaced objects in reference: " << ref_displaced_obj << std::endl;
     std::cout << "Displaced objects in current: " << curr_displaced_obj << std::endl;
 
+    //TODO put all plane reconstructions into one cloud
     //visualization
     //put all planes together in one pcd-file as reference
     //copy the fused cloud and add colored points from detected objects (e.g. removed ones red, new ones green, and displaced ones r and g random and b high number)
+    ObjectVisualization vis(ref_cloud, curr_cloud, removed_obj, new_obj, ref_displaced_obj, curr_displaced_obj);
+    vis.visualize();
 
 }
 

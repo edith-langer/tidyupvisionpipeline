@@ -23,7 +23,6 @@
 #include <v4r/geometry/normals.h>
 
 #include "scene_differencing_points.h"
-#include "extract_objects_using_semantics.h"
 #include "local_object_verification.h"
 #include "object_visualization.h"
 #include "region_growing.h"

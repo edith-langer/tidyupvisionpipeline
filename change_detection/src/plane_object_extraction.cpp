@@ -232,7 +232,7 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
     ex_prism.setViewPoint(0,0,5); //this is used to flip the plane normal towards the viewpoint, if necessary
     ex_prism.setInputCloud (cropped_cloud);
     ex_prism.setInputPlanarHull (cloud_hull);
-    ex_prism.setHeightLimits(0.02, 0.2);
+    ex_prism.setHeightLimits(0.02, 0.25);
     pcl::PointIndices::Ptr object_indices (new pcl::PointIndices);
     ex_prism.segment (*object_indices);
 
