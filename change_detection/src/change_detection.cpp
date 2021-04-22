@@ -124,17 +124,6 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
         cleanResult(novel_objects_cloud, 0.02);
         pcl::io::savePCDFileBinary(curr_res_path + "/result_after_LV.pcd", *novel_objects_cloud);
 
-        //filter out objects with similar color to supporting plane and are planar
-        std::string objects_corr_planar_path = curr_res_path + "/objects_with_corr_planar/";
-        boost::filesystem::create_directories(objects_corr_planar_path);
-        filterPlanarAndColor(novel_objects, curr_cloud_downsampled, objects_corr_planar_path);
-        novel_objects_cloud = fromObjectVecToObjectCloud(novel_objects, curr_cloud_downsampled);
-        pcl::io::savePCDFileBinary(curr_res_path + "/result_after_LV_filtering_planar_objects.pcd", *novel_objects_cloud);
-        objectRegionGrowing(curr_cloud_downsampled, novel_objects, 3000);  //this removes very big clusters after growing
-        mergeObjects(novel_objects); //in case an object was detected several times (disjoint sets originally, but prob. overlapping after region growing)
-        novel_objects_cloud = fromObjectVecToObjectCloud(novel_objects, curr_cloud_downsampled);
-        pcl::io::savePCDFileBinary(curr_res_path + "/result_after_LV_objectGrowing.pcd", *novel_objects_cloud);
-
         curr_objects = novel_objects;
 
 
@@ -148,18 +137,32 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
         cleanResult(disappeared_objects_cloud, 0.02);
         pcl::io::savePCDFileBinary(ref_res_path + "/result_after_LV.pcd", *disappeared_objects_cloud);
 
-        objects_corr_planar_path = ref_res_path + "/objects_with_corr_planar/";
-        boost::filesystem::create_directories(objects_corr_planar_path);
-        filterPlanarAndColor(disappeared_objects, ref_cloud_downsampled, objects_corr_planar_path);
-        disappeared_objects_cloud = fromObjectVecToObjectCloud(disappeared_objects, ref_cloud_downsampled);
-        pcl::io::savePCDFileBinary(ref_res_path + "/result_after_LV_filtering_planar_objects.pcd", *disappeared_objects_cloud);
-        objectRegionGrowing(ref_cloud_downsampled, disappeared_objects, 3000);  //this removes very big clusters after growing
-        mergeObjects(disappeared_objects); //in case an object was detected several times (disjoint sets originally, but prob. overlapping after region growing)
-        disappeared_objects_cloud = fromObjectVecToObjectCloud(disappeared_objects, ref_cloud_downsampled);
-        pcl::io::savePCDFileBinary(ref_res_path + "/result_after_LV_objectGrowing.pcd", *disappeared_objects_cloud);
-
         ref_objects = disappeared_objects;
     }
+    //no LV, but region growing and iflter planar objects similar to supporting plane
+    else {
+        //filter out objects with similar color to supporting plane and are planar
+        std::string objects_corr_planar_path = curr_res_path + "/objects_with_corr_planar/";
+        boost::filesystem::create_directories(objects_corr_planar_path);
+        filterPlanarAndColor(curr_objects, curr_cloud_downsampled, objects_corr_planar_path);
+        pcl::PointCloud<PointNormal>::Ptr  novel_objects_cloud = fromObjectVecToObjectCloud(curr_objects, curr_cloud_downsampled);
+        pcl::io::savePCDFileBinary(curr_res_path + "/result_after_LV_filtering_planar_objects.pcd", *novel_objects_cloud);
+        objectRegionGrowing(curr_cloud_downsampled, curr_objects, 3000);  //this removes very big clusters after growing
+        mergeObjects(curr_objects); //in case an object was detected several times (disjoint sets originally, but prob. overlapping after region growing)
+        novel_objects_cloud = fromObjectVecToObjectCloud(curr_objects, curr_cloud_downsampled);
+        pcl::io::savePCDFileBinary(curr_res_path + "/result_after_LV_objectGrowing.pcd", *novel_objects_cloud);
+
+        objects_corr_planar_path = ref_res_path + "/objects_with_corr_planar/";
+        boost::filesystem::create_directories(objects_corr_planar_path);
+        filterPlanarAndColor(ref_objects, ref_cloud_downsampled, objects_corr_planar_path);
+        pcl::PointCloud<PointNormal>::Ptr disappeared_objects_cloud = fromObjectVecToObjectCloud(ref_objects, ref_cloud_downsampled);
+        pcl::io::savePCDFileBinary(ref_res_path + "/result_after_LV_filtering_planar_objects.pcd", *disappeared_objects_cloud);
+        objectRegionGrowing(ref_cloud_downsampled, ref_objects, 3000);  //this removes very big clusters after growing
+        mergeObjects(ref_objects); //in case an object was detected several times (disjoint sets originally, but prob. overlapping after region growing)
+        disappeared_objects_cloud = fromObjectVecToObjectCloud(ref_objects, ref_cloud_downsampled);
+        pcl::io::savePCDFileBinary(ref_res_path + "/result_after_LV_objectGrowing.pcd", *disappeared_objects_cloud);
+    }
+
 
 
     //----------------Upsample again to have the objects and planes in full resolution----------
