@@ -4,7 +4,7 @@ int DetectedObject::s_id = 0;
 
 
 const float diff_dist = 0.01;
-const float add_crop_static = 0.20; //the amount that should be added to each cluster in the static version when doing the crop
+const float add_crop_static = 0.10; //the amount that should be added to each cluster in the static version when doing the crop
 const float icp_max_corr_dist = 0.15;
 const float icp_max_corr_dist_plane = 0.05;
 const int icp_max_iter = 500;
@@ -76,7 +76,7 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
     for (size_t i = 0; i < curr_object_ind.size(); i++) {
         curr_objects_plane_cloud->points.at(curr_object_ind[i]) = curr_cloud_downsampled->points.at(curr_object_ind[i]);
     }
-    std::vector<pcl::PointIndices> pot_object_ind = cleanResult(curr_objects_plane_cloud, 0.02);
+    std::vector<pcl::PointIndices> pot_object_ind = removeClusteroutliersBySize(curr_objects_plane_cloud, 0.02);
     std::vector<PlaneWithObjInd> curr_objects;
     //cluster detected objects in separate objects
     for (size_t i = 0; i < pot_object_ind.size(); i++) {
@@ -97,7 +97,7 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
     for (size_t i = 0; i < ref_object_ind.size(); i++) {
         ref_objects_plane_cloud->points.at(ref_object_ind[i]) = ref_cloud_downsampled->points.at(ref_object_ind[i]);
     }
-    pot_object_ind = cleanResult(ref_objects_plane_cloud, 0.02);
+    pot_object_ind = removeClusteroutliersBySize(ref_objects_plane_cloud, 0.02);
     std::vector<PlaneWithObjInd> ref_objects;
     //cluster detected objects in separate objects
     for (size_t i = 0; i < pot_object_ind.size(); i++) {
@@ -121,7 +121,7 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
         local_verification.setDebugOutputPath(curr_res_path);
         std::vector<PlaneWithObjInd> novel_objects = local_verification.verify_changed_objects();
         pcl::PointCloud<PointNormal>::Ptr novel_objects_cloud = fromObjectVecToObjectCloud(novel_objects, curr_cloud_downsampled);
-        cleanResult(novel_objects_cloud, 0.02);
+        removeClusteroutliersBySize(novel_objects_cloud, 0.02);
         pcl::io::savePCDFileBinary(curr_res_path + "/result_after_LV.pcd", *novel_objects_cloud);
 
         curr_objects = novel_objects;
@@ -134,7 +134,7 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
         local_verification.setDebugOutputPath(ref_res_path);
         std::vector<PlaneWithObjInd> disappeared_objects = local_verification.verify_changed_objects();
         pcl::PointCloud<PointNormal>::Ptr disappeared_objects_cloud = fromObjectVecToObjectCloud(disappeared_objects, ref_cloud_downsampled);
-        cleanResult(disappeared_objects_cloud, 0.02);
+        removeClusteroutliersBySize(disappeared_objects_cloud, 0.02);
         pcl::io::savePCDFileBinary(ref_res_path + "/result_after_LV.pcd", *disappeared_objects_cloud);
 
         ref_objects = disappeared_objects;
@@ -246,18 +246,33 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
         return;
     }
 
-
     //matches between same plane different timestamps
-    //TODO different code if LV was performed
     ObjectMatching object_matching(ref_objects_vec, curr_objects_vec, model_path, ppf_config_path_);
     std::vector<Match> matches = object_matching.compute(ref_result, curr_result);
 
+    //region growing of static/displaced objects (should create more precise results if e.g. the model was smaller than die object or not precisely aligned
+    cleanResult(ref_result);
+    cleanResult(curr_result);
 
+    //removeClusterOutliers
+    for (DetectedObject o : ref_result) {
+        removeClusteroutliersBySize(o.object_cloud_, 0.01);
+    }
+    for (DetectedObject o : curr_result) {
+        removeClusteroutliersBySize(o.object_cloud_, 0.01);
+    }
 
-    //Visualize two clouds next to each other. Reference cloud showing disappeared objects.
-    //Current cloud showing novel objects. Both showing displaced objects.
-//    ObjectVisualization vis(ref_cloud_, disappeared_objects_cloud, curr_cloud_, novel_objects_cloud);
-//    vis.visualize();
+    //remove objects that have an empty cloud now
+    ref_result.erase(std::remove_if(
+                    ref_result.begin(),
+                    ref_result.end(),
+                    [&](DetectedObject const & o) { return o.object_cloud_->size() == 0; }
+                ), ref_result.end());
+    curr_result.erase(std::remove_if(
+                    curr_result.begin(),
+                    curr_result.end(),
+                    [&](DetectedObject const & o) { return o.object_cloud_->size() == 0; }
+                ), curr_result.end());
 
 }
 
@@ -414,7 +429,7 @@ void ChangeDetection::objectRegionGrowing(pcl::PointCloud<PointNormal>::Ptr clou
         //remove supporting plane
         //we do not use the plane points directly because there is a chance that they do not cover the whole plane.
         //This is because the plane extraction part operates on semantic segmentation and if one plane is assigned to several labels, they are not part of the detected plane.
-        pcl::SampleConsensusModelPlane<PointType>::Ptr dit (new pcl::SampleConsensusModelPlane<PointType> (cloud_crop));
+        pcl::SampleConsensusModelPlane<PointNormal>::Ptr dit (new pcl::SampleConsensusModelPlane<PointNormal> (cloud_crop));
         std::vector<int> inliers;
         Eigen::Vector4f vec_coeff (objects[i].plane.coeffs->values.data ()); //from pcl::ModelCoefficients to Eigen::Vector
         dit -> selectWithinDistance (vec_coeff, 0.01, inliers);
@@ -706,7 +721,7 @@ void ChangeDetection::refineNormals(pcl::PointCloud<PointNormal>::Ptr object_clo
 }
 
 //removes small clusters from input cloud and returns all valid clusters
-std::vector<pcl::PointIndices> ChangeDetection::cleanResult(pcl::PointCloud<PointNormal>::Ptr cloud, float cluster_thr) {
+std::vector<pcl::PointIndices> ChangeDetection::removeClusteroutliersBySize(pcl::PointCloud<PointNormal>::Ptr cloud, float cluster_thr, int min_cluster_size, int max_cluster_size) {
     //clean up small things
     std::vector<pcl::PointIndices> cluster_indices;
     if (cloud->empty()) {
@@ -729,8 +744,8 @@ std::vector<pcl::PointIndices> ChangeDetection::cleanResult(pcl::PointCloud<Poin
 
     pcl::EuclideanClusterExtraction<PointNormal> ec;
     ec.setClusterTolerance (cluster_thr);
-    ec.setMinClusterSize (15);
-    ec.setMaxClusterSize (std::numeric_limits<int>::max());
+    ec.setMinClusterSize (min_cluster_size);
+    ec.setMaxClusterSize (max_cluster_size);
     ec.setSearchMethod(tree);
     ec.setInputCloud (cloud);
     ec.extract (cluster_indices);
@@ -747,3 +762,39 @@ std::vector<pcl::PointIndices> ChangeDetection::cleanResult(pcl::PointCloud<Poin
 
     return cluster_indices;
 }
+
+//TODO: region growing based on color
+//check clusters from new/removed objects if they could belong to a displaced/static cluster
+//small clusters that could be added via region growing to a displaced/static object
+void ChangeDetection::cleanResult(std::vector<DetectedObject> &detected_objects) {
+    for (size_t i = 0; i < detected_objects.size(); i++) {
+        if (detected_objects[i].state_ == ObjectState::NEW || detected_objects[i].state_ == ObjectState::REMOVED) {
+            for (size_t j = 0; j < detected_objects.size(); j++) {
+                if (detected_objects[j].state_ == ObjectState::STATIC || detected_objects[j].state_ == ObjectState::DISPLACED) {
+                    //call the region growing method
+                    pcl::PointCloud<PointNormal>::Ptr combined_object(new pcl::PointCloud<PointNormal>);
+                    *combined_object += *detected_objects[i].object_cloud_;
+                    *combined_object += *detected_objects[j].object_cloud_;
+                    pcl::PointCloud<pcl::Normal>::Ptr obj_normals(new pcl::PointCloud<pcl::Normal>);
+                    pcl::copyPointCloud(*combined_object, *obj_normals);
+                    RegionGrowing<PointNormal, PointNormal> region_growing(combined_object, detected_objects[j].object_cloud_, obj_normals, false);
+                    std::vector<int> add_object_ind = region_growing.compute();
+
+                    pcl::ExtractIndices<PointNormal> extract;
+                    extract.setInputCloud (combined_object);
+                    pcl::PointIndices::Ptr obj_ind(new pcl::PointIndices);
+                    obj_ind->indices = add_object_ind;
+                    extract.setIndices (obj_ind);
+                    extract.setNegative (false);
+                    extract.setKeepOrganized(false);
+                    extract.filter(*detected_objects[j].object_cloud_);
+
+                    extract.setNegative (true);
+                    extract.setKeepOrganized(false);
+                    extract.filter(*detected_objects[i].object_cloud_);
+                }
+            }
+        }
+    }
+}
+

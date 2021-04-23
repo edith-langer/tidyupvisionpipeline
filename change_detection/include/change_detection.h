@@ -78,7 +78,7 @@ private:
 
 
     void refineNormals(pcl::PointCloud<PointNormal>::Ptr object_cloud);
-    std::vector<pcl::PointIndices> cleanResult(pcl::PointCloud<PointNormal>::Ptr cloud, float cluster_thr);
+    std::vector<pcl::PointIndices> removeClusteroutliersBySize(pcl::PointCloud<PointNormal>::Ptr cloud, float cluster_thr, int min_cluster_size=15, int max_cluster_size=std::numeric_limits<int>::max());
     pcl::PointCloud<PointNormal>::Ptr downsampleCloud(pcl::PointCloud<PointNormal>::Ptr input, double leafSize);
     void upsampleObjectsAndPlanes(pcl::PointCloud<PointNormal>::Ptr orig_cloud, pcl::PointCloud<PointNormal>::Ptr ds_cloud,
                                   std::vector<PlaneWithObjInd> &objects, double leaf_size, std::string res_path);
@@ -93,6 +93,7 @@ private:
     int checkPlanarity (PlaneWithObjInd& objects, pcl::PointCloud<PointNormal>::Ptr cloud, float _plane_dist_thr);
     void filterPlanarAndColor(std::vector<PlaneWithObjInd>& objects, pcl::PointCloud<PointNormal>::Ptr cloud, std::string path, float _plane_dist_thr=0.005, int _nr_bins=10 );
     double checkColorSimilarity(PlaneWithObjInd& object, pcl::PointCloud<PointNormal>::Ptr cloud, int _nr_bins=10) ;
+    void cleanResult(std::vector<DetectedObject> &detected_objects);
 };
 
 #endif // CHANGE_DETECTION_H

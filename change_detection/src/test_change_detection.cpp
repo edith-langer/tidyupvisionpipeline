@@ -144,6 +144,7 @@ int main(int argc, char* argv[])
     change_detection.init(ref_cloud, curr_cloud, ref_plane_coeffs, curr_plane_coeffs, curr_hull_cloud, ref_hull_cloud, result_path);
     change_detection.compute(ref_result, curr_result);
 
+    //TODO check if all existing model folders are also present in ref_result
     //all detected objects labeled as removed (ref_objects) or new (curr_objects) could be placed on another plane
     for (DetectedObject ro : ref_result) {
         if (ro.state_ == ObjectState::REMOVED) {

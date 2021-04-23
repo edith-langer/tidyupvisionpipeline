@@ -67,13 +67,13 @@ void ObjectVisualization::visualize() {
             ref_objects_cloud->points[i].r = r;
             ref_objects_cloud->points[i].g = g;
             ref_objects_cloud->points[i].b = b;
-            ref_objects_cloud->points[i].a = 100;
+            ref_objects_cloud->points[i].a = 255; //100
         }
         for (size_t i = 0; i < curr_objects_cloud->size(); i++) {
             curr_objects_cloud->points[i].r = r;
             curr_objects_cloud->points[i].g = g;
             curr_objects_cloud->points[i].b = b;
-            curr_objects_cloud->points[i].a = 100;
+            curr_objects_cloud->points[i].a = 255; //100
         }
         *displaced_ref_objects_cloud += *ref_objects_cloud;
         *displaced_curr_objects_cloud += *curr_objects_cloud;
