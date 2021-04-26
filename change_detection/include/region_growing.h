@@ -1,6 +1,8 @@
 #ifndef REGIONGROWING_H
 #define REGIONGROWING_H
 
+#include <opencv2/imgproc/imgproc.hpp>
+
 #include <pcl/common/angles.h>
 #include <pcl/octree/octree.h>
 #include <pcl/common/common.h>
@@ -8,16 +10,21 @@
 #include <pcl/io/pcd_io.h>
 #include <pcl/search/search.h>
 
+#include <v4r/common/color_comparison.h>
+
+
 template <typename PointT, typename PointQ>
 class RegionGrowing
 {
 public:
-    RegionGrowing(typename pcl::PointCloud<PointT>::ConstPtr scene, typename pcl::PointCloud<PointQ>::ConstPtr object, pcl::PointCloud<pcl::Normal>::ConstPtr scene_normals,
-                  bool is_object_downsampled,
-                  double octree_res=0.01, float eps_angle_threshold_deg=5, float max_neighbour_distance=0.02, float curvature_threshold=0.08) :
+    RegionGrowing(typename pcl::PointCloud<PointT>::ConstPtr scene, typename pcl::PointCloud<PointQ>::ConstPtr object,
+                  pcl::PointCloud<pcl::Normal>::ConstPtr scene_normals, bool is_object_downsampled,
+                  float color_thr=std::numeric_limits<float>::max(),
+                  double octree_res=0.01, float eps_angle_threshold_deg=5, float max_neighbour_distance=0.02, float curvature_threshold=0.08
+                  ) :
         scene_(scene), object_(object), scene_normals_(scene_normals), is_object_downsampled_(is_object_downsampled),
         octree_res_(octree_res), eps_angle_threshold_deg_(eps_angle_threshold_deg),
-        max_neighbour_distance_(max_neighbour_distance), curvature_threshold_(curvature_threshold)
+        max_neighbour_distance_(max_neighbour_distance), curvature_threshold_(curvature_threshold), color_thr_(color_thr)
     {
     }
 
@@ -100,8 +107,6 @@ public:
                 //                    }
 
                 float radius = max_neighbour_distance_;
-                float curvature_threshold = curvature_threshold_;
-                float eps_angle_threshold = eps_angle_threshold_rad;
 
                 if (!octree_->radiusSearch(query_pt, std::sqrt(2) * radius, nn_indices, nn_sqrt_distances)) {
                     sq_idx++;
@@ -125,6 +130,18 @@ public:
                     double dot_p = n1.dot(n2);
 
                     if (fabs(dot_p) > cos(eps_angle_threshold_rad)) {
+                        if (color_thr_ != std::numeric_limits<float>::max()) {
+                        //check if also color is similar
+                            Eigen::Vector3i  m_rgb =  query_pt.getRGBVector3i();
+                            Eigen::Vector3f color_m = rgb2lab(m_rgb);
+                            Eigen::Vector3i  o_rgb =  scene_->points[nn_indices[j]].getRGBVector3i();
+                            Eigen::Vector3f color_o = rgb2lab(o_rgb);
+                            float color_distance_ = v4r::computeCIEDE2000(color_o, color_m);
+                            if (color_distance_ > color_thr_) {
+                                continue;
+                            }
+                        }
+                        //add point
                         processed_scene[nn_indices[j]] = true;
                         seed_queue.push_back(nn_indices[j]);
                         orig_object_ind.push_back(nn_indices[j]);
@@ -166,6 +183,20 @@ private:
     float eps_angle_threshold_deg_;
     float max_neighbour_distance_;
     float curvature_threshold_;
+    float color_thr_;
+
+    Eigen::Vector3f rgb2lab(const Eigen::Vector3i &rgb) {
+        cv::Mat rgb_cv (1,1, CV_8UC3);  //this has some information loss because Lab values are also just uchar and not float
+        rgb_cv.at<cv::Vec3b>(0,0)[0] = rgb[0];
+        rgb_cv.at<cv::Vec3b>(0,0)[1] = rgb[1];
+        rgb_cv.at<cv::Vec3b>(0,0)[2] = rgb[2];
+        cv::Mat lab_cv;
+        cv::cvtColor(rgb_cv, lab_cv, CV_RGB2Lab);
+
+        Eigen::Vector3f lab; //from opencv lab to orig lab definition
+        lab << lab_cv.at<cv::Vec3b>(0,0)[0] / 2.55f, lab_cv.at<cv::Vec3b>(0,0)[1] - 128.f, lab_cv.at<cv::Vec3b>(0,0)[2] - 128.f;
+        return lab;
+    }
 };
 
 #endif // REGIONGROWING_H

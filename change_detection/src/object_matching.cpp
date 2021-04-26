@@ -316,9 +316,6 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
                 model_part.match_.object_id = model_part.getID();
                 model_vec_.push_back((model_part));
 
-                //TODO clean remaining part = remove small clusters from model_diff_cloud
-
-
                 //the remaining part of the model
                 pcl::transformPointCloudWithNormals(*model_diff_cloud, *model_diff_cloud, match_iter->transform.inverse());
                 model_vec_[r].object_cloud_=model_diff_cloud;
@@ -362,8 +359,6 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
                 std::string result_cloud_path = cloud_matches_dir + "/matchResult_model_" + std::to_string(match_iter->model_id) +"_conf_" + std::to_string(match_iter->confidence)+ "_" +
                         (ppf_params.ppf_rec_pipeline_.use_color_ ? "_color" : "");
                 saveCloudResults(matched_object_part, model_aligned, model_aligned, result_cloud_path); //we don't have access to the not refined model
-
-                //TODO clean remaining part = remove small clusters from model_diff_cloud
 
                 //the remaining part of the object
                 //ATTENTION: The obj_iter is invalid now because of the push_back before. Vector re-allocates and invalidates pointers

@@ -158,11 +158,11 @@ int main(int argc, char* argv[])
                     boost::filesystem::create_directories(dest_folder);
                     //copy the folder to another directory. The model is already matched and should not be used anymore
                     for (const auto& dirEnt : boost::filesystem::recursive_directory_iterator{orig_path})
-                        {
-                            const auto& path = dirEnt.path();
-                            boost::filesystem::copy(path, dest_folder / path.filename());
-                            std::cout << "Copy " << path << " to " << (dest_folder / path.filename()) << std::endl;
-                        }
+                    {
+                        const auto& path = dirEnt.path();
+                        boost::filesystem::copy(path, dest_folder / path.filename());
+                        std::cout << "Copy " << path << " to " << (dest_folder / path.filename()) << std::endl;
+                    }
                 }
                 boost::filesystem::remove_all(orig_path);
                 boost::filesystem::create_directories(orig_path);
@@ -213,12 +213,45 @@ int main(int argc, char* argv[])
     std::cout << "Displaced objects in reference: " << ref_displaced_obj << std::endl;
     std::cout << "Displaced objects in current: " << curr_displaced_obj << std::endl;
 
+
+    //create point clouds of detected objects to save results as pcd-files
+    pcl::PointCloud<PointNormal>::Ptr ref_removed_objects_cloud(new pcl::PointCloud<PointNormal>);
+    pcl::PointCloud<PointNormal>::Ptr ref_displaced_objects_cloud(new pcl::PointCloud<PointNormal>);
+    pcl::PointCloud<PointNormal>::Ptr curr_new_objects_cloud(new pcl::PointCloud<PointNormal>);
+    pcl::PointCloud<PointNormal>::Ptr curr_displaced_objects_cloud(new pcl::PointCloud<PointNormal>);
+
+    for (size_t i = 0; i < removed_obj.size(); i++) {
+        *ref_removed_objects_cloud += *(removed_obj[i].object_cloud_);
+    }
+    if (!ref_removed_objects_cloud->empty())
+        pcl::io::savePCDFile(result_path + "/ref_removed_objects.pcd", *ref_removed_objects_cloud);
+
+    for (size_t i = 0; i < ref_displaced_obj.size(); i++) {
+        *ref_displaced_objects_cloud += *(ref_displaced_obj[i].object_cloud_);
+    }
+    if (!ref_displaced_objects_cloud->empty())
+        pcl::io::savePCDFile(result_path + "/ref_displaced_objects.pcd", *ref_displaced_objects_cloud);
+
+    for (size_t i = 0; i < new_obj.size(); i++) {
+        *curr_new_objects_cloud += *(new_obj[i].object_cloud_);
+    }
+    if (!curr_new_objects_cloud->empty())
+        pcl::io::savePCDFile(result_path + "/curr_new_objects.pcd", *curr_new_objects_cloud);
+
+    for (size_t i = 0; i < curr_displaced_obj.size(); i++) {
+        *curr_displaced_objects_cloud += *(curr_displaced_obj[i].object_cloud_);
+    }
+    if (!curr_displaced_objects_cloud->empty())
+        pcl::io::savePCDFile(result_path + "/curr_displaced_objects.pcd", *curr_displaced_objects_cloud);
+
+
     //TODO put all plane reconstructions into one cloud
     //visualization
     //put all planes together in one pcd-file as reference
     //copy the fused cloud and add colored points from detected objects (e.g. removed ones red, new ones green, and displaced ones r and g random and b high number)
     ObjectVisualization vis(ref_cloud, curr_cloud, removed_obj, new_obj, ref_displaced_obj, curr_displaced_obj);
     vis.visualize();
+
 
 }
 

@@ -64,7 +64,7 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
     //call computeObjectsOnPlanes twice with different input.
     //The result contains points of clusters detected on top of the main plane
     //---Current objects------
-    std::string curr_res_path =  output_path_ + "/curr_cloud/";
+    std::string curr_res_path =  output_path_ + (do_LV_before_matching ? "_withLV":"" ) + "/curr_cloud/";
     boost::filesystem::create_directories(curr_res_path);
     ExtractObjectsFromPlanes extract_curr_objects(curr_cloud_downsampled, curr_plane_coeffs_, curr_convex_hull_pts_, curr_res_path);
     PlaneWithObjInd curr_objects_merged = extract_curr_objects.computeObjectsOnPlanes();
@@ -88,7 +88,7 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
     //mergeObjects(curr_objects); //this is necessary here because it could happen that the same object was extracted twice from slightly different planes
 
     //---Reference objects---
-    std::string ref_res_path =  output_path_ + "/ref_cloud";
+    std::string ref_res_path =  output_path_ + (do_LV_before_matching ? "_withLV":"" ) + "/ref_cloud";
     boost::filesystem::create_directories(ref_res_path);
     ExtractObjectsFromPlanes extract_ref_objects(ref_cloud_downsampled, ref_plane_coeffs_, ref_convex_hull_pts_, ref_res_path);
     PlaneWithObjInd ref_objects_merged = extract_ref_objects.computeObjectsOnPlanes();
@@ -113,7 +113,6 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
 
     //------------------------------LOCAL VERIFICATION IF WANTED--------------------------------------------------------
     if (do_LV_before_matching && curr_objects.size() != 0 && ref_objects.size() != 0) {
-        //TODO fill static_objects in the result objects
         LocalObjectVerificationParams lv_params{diff_dist, add_crop_static, icp_max_corr_dist, icp_max_corr_dist_plane,
                     icp_max_iter, icp_ransac_thr, color_weight, overlap_weight, min_score_thr};
         //local object verification
@@ -763,9 +762,7 @@ std::vector<pcl::PointIndices> ChangeDetection::removeClusteroutliersBySize(pcl:
     return cluster_indices;
 }
 
-//TODO: region growing based on color
 //check clusters from new/removed objects if they could belong to a displaced/static cluster
-//small clusters that could be added via region growing to a displaced/static object
 void ChangeDetection::cleanResult(std::vector<DetectedObject> &detected_objects) {
     for (size_t i = 0; i < detected_objects.size(); i++) {
         if (detected_objects[i].state_ == ObjectState::NEW || detected_objects[i].state_ == ObjectState::REMOVED) {
@@ -777,7 +774,7 @@ void ChangeDetection::cleanResult(std::vector<DetectedObject> &detected_objects)
                     *combined_object += *detected_objects[j].object_cloud_;
                     pcl::PointCloud<pcl::Normal>::Ptr obj_normals(new pcl::PointCloud<pcl::Normal>);
                     pcl::copyPointCloud(*combined_object, *obj_normals);
-                    RegionGrowing<PointNormal, PointNormal> region_growing(combined_object, detected_objects[j].object_cloud_, obj_normals, false);
+                    RegionGrowing<PointNormal, PointNormal> region_growing(combined_object, detected_objects[j].object_cloud_, obj_normals, false, 20.0);
                     std::vector<int> add_object_ind = region_growing.compute();
 
                     pcl::ExtractIndices<PointNormal> extract;

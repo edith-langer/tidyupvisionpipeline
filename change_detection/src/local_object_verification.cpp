@@ -194,7 +194,6 @@ std::vector<PlaneWithObjInd> LocalObjectVerification::verify_changed_objects() {
             pcl::io::savePCDFileBinary(crop_result_path + "/static_crop_no_supp_plane_cluster"  + std::to_string(c) +".pcd", *static_crop_filtered);
 
             //now do a 3D transformation with the cluster and the static crop
-            //TODO do a normal based icp?
             pcl::registration::WarpPointRigid3D<PointType, PointType>::Ptr warp_fcn_3d (new pcl::registration::WarpPointRigid3D<PointType, PointType>);
             te->setWarpFunction (warp_fcn_3d);
 
