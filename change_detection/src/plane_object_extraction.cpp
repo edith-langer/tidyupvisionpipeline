@@ -56,16 +56,17 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
     pcl::PointXYZ max_hull_pt, min_hull_pt;
     pcl::getMinMax3D(*convex_hull_pts_, min_hull_pt, max_hull_pt);
 
+    //add some alignment because hull points were computed from a full room reconstruction that may include drift
     pcl::PointCloud<PointNormal>::Ptr cropped_cloud(new pcl::PointCloud<PointNormal>);
     pcl::PassThrough<PointNormal> pass;
     pass.setInputCloud(orig_cloud_);
     pass.setFilterFieldName("x");
-    pass.setFilterLimits(min_hull_pt.x - 0.1, max_hull_pt.x + 0.1);
+    pass.setFilterLimits(min_hull_pt.x - 0.15, max_hull_pt.x + 0.15);
     pass.setKeepOrganized(true);
     pass.filter(*cropped_cloud);
     pass.setInputCloud(cropped_cloud);
     pass.setFilterFieldName("y");
-    pass.setFilterLimits(min_hull_pt.y - 0.1, max_hull_pt.y + 0.1);
+    pass.setFilterLimits(min_hull_pt.y - 0.15, max_hull_pt.y + 0.15);
     pass.setKeepOrganized(true);
     pass.filter(*cropped_cloud);
 
@@ -89,8 +90,8 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
 
     //remove NANs before applying RANSAC
     std::vector<int> nan_ind;
-    pcl::PointCloud<PointNormal>::Ptr rough_plane__no_nans_cloud (new pcl::PointCloud<PointNormal>);
-    pcl::removeNaNFromPointCloud(*rough_plane_cloud, *rough_plane__no_nans_cloud, nan_ind);
+    pcl::PointCloud<PointNormal>::Ptr rough_plane_no_nans_cloud (new pcl::PointCloud<PointNormal>);
+    pcl::removeNaNFromPointCloud(*rough_plane_cloud, *rough_plane_no_nans_cloud, nan_ind);
 
     // Create the segmentation object
     pcl::SACSegmentation<PointNormal> seg;
@@ -102,7 +103,7 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
     seg.setAxis(Eigen::Vector3f(0,0,1));
     seg.setEpsAngle(5.0f * (M_PI/180.0f)); //without setting an angle, the axis is ignored and all planes get segmented
     pcl::ModelCoefficients::Ptr new_plane_coefficients (new pcl::ModelCoefficients);
-    seg.setInputCloud(rough_plane__no_nans_cloud);
+    seg.setInputCloud(rough_plane_no_nans_cloud);
     seg.segment (*main_plane_inliers, *new_plane_coefficients);
 
     std::cout << "Extracted main plane with " << main_plane_inliers->indices.size() << " inliers" << std::endl;

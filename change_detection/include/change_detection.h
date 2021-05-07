@@ -42,9 +42,9 @@ public:
     ChangeDetection(std::string ppf_config_path) : ppf_config_path_(ppf_config_path) {}
 
     void init(pcl::PointCloud<PointNormal>::Ptr ref_cloud, pcl::PointCloud<PointNormal>::Ptr curr_cloud,
-              Eigen::Vector4f ref_plane_coeffs, Eigen::Vector4f curr_plane_coeffs,
+              const Eigen::Vector4f &ref_plane_coeffs, const Eigen::Vector4f &curr_plane_coeffs,
               pcl::PointCloud<pcl::PointXYZ>::Ptr ref_convex_hull_pts, pcl::PointCloud<pcl::PointXYZ>::Ptr curr_convex_hull_pts,
-              std::string output_path = "");
+              std::string ppf_model_path, std::string output_path = "");
 
     void setOutputPath (std::string output_path) {
         output_path_ = output_path;
@@ -59,11 +59,13 @@ public:
     }
 
     void compute(std::vector<DetectedObject> &ref_result, std::vector<DetectedObject> &curr_result);
+    static pcl::PointCloud<PointNormal>::Ptr downsampleCloud(pcl::PointCloud<PointNormal>::Ptr input, double leafSize);
 
 private:
     //std::string object_store_path_; //the model objects and their ppf model get stored here --> for now we store everything in output path
     std::string ppf_config_path_; //the config file that stores the parrameters for PPF
     std::string output_path_; //all debugging things will get stored there (+model objects and their ppf model)
+    std::string ppf_model_path_;
 
     std::vector<PlaneWithObjInd> potential_objects_;
     pcl::PointCloud<PointNormal>::Ptr ref_cloud_;
@@ -79,7 +81,6 @@ private:
 
     void refineNormals(pcl::PointCloud<PointNormal>::Ptr object_cloud);
     std::vector<pcl::PointIndices> removeClusteroutliersBySize(pcl::PointCloud<PointNormal>::Ptr cloud, float cluster_thr, int min_cluster_size=15, int max_cluster_size=std::numeric_limits<int>::max());
-    pcl::PointCloud<PointNormal>::Ptr downsampleCloud(pcl::PointCloud<PointNormal>::Ptr input, double leafSize);
     void upsampleObjectsAndPlanes(pcl::PointCloud<PointNormal>::Ptr orig_cloud, pcl::PointCloud<PointNormal>::Ptr ds_cloud,
                                   std::vector<PlaneWithObjInd> &objects, double leaf_size, std::string res_path);
     std::tuple<pcl::PointCloud<PointNormal>::Ptr, std::vector<int> > upsampleObjects(pcl::octree::OctreePointCloudSearch<PointNormal>::Ptr octree, pcl::PointCloud<PointNormal>::Ptr orig_input_cloud,

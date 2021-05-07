@@ -83,9 +83,12 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
 
     // use recognizer
     //---------------------------------------------------------------------------
-    std::vector<std::string> objects_to_look_for{};   // empty vector means look for all objects
+    //std::vector<std::string> objects_to_look_for{};   // empty vector means look for all objects
+    std::vector<std::string> objects_to_look_for;
+    for (DetectedObject m : model_vec_)
+        objects_to_look_for.push_back(std::to_string(m.getID()));
 
-    for (size_t i = 0; i < object_vec_.size(); i++) {
+     for (size_t i = 0; i < object_vec_.size(); i++) {
 
         /// Create separate rgb and normal clouds in both cases to be able to call the recognizer
         pcl::PointCloud<pcl::Normal>::Ptr object_normals(new pcl::PointCloud<pcl::Normal>);
@@ -260,6 +263,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
 
     std::cout << "Time spent to recognize objects with PPF: " << (ppf_rec_time_sum/1000) << " seconds." << std::endl;
 
+    //TODO what if model_vec[i] is more than once in the match vector??? execute find_if in a loop
     //define the state of the detected objects based on the found matches
     for (size_t r = 0; r < model_vec_.size(); r++) {
         DetectedObject &ro = model_vec_[r];
@@ -313,7 +317,6 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
                 pcl::transformPointCloudWithNormals(*matched_model_part, *matched_model_part, match_iter->transform.inverse());
                 DetectedObject model_part(matched_model_part, ro.plane_cloud_, ro.supp_plane_, (is_static ? ObjectState::STATIC : ObjectState::DISPLACED), "");
                 model_part.match_ = *match_iter;
-                model_part.match_.object_id = model_part.getID();
                 model_vec_.push_back((model_part));
 
                 //the remaining part of the model
@@ -350,7 +353,6 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
                 extract.filter(*matched_object_part);
                 DetectedObject object_part(matched_object_part, obj_iter->plane_cloud_, obj_iter->supp_plane_, (is_static ? ObjectState::STATIC : ObjectState::DISPLACED), "");
                 object_part.match_ = *match_iter;
-                object_part.match_.object_id = object_part.getID();
                 object_vec_.push_back(object_part);
                 //save the new partly matched object
                 boost::filesystem::path model_path_orig(model_path_);
@@ -374,7 +376,6 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
 
     //set all unmatched current objects to NEW
     for (DetectedObject &co : object_vec_) {
-        auto m_iter = std::find_if( model_obj_matches.begin(), model_obj_matches.end(),[&co](Match const &m) {return m.object_id == co.getID(); });
         //curr object was not matched --> new or displaced on other plane
         if (co.state_ == ObjectState::UNKNOWN) {
             co.state_ = ObjectState::NEW;
@@ -384,7 +385,6 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
 
     //set all unmatched ref objects to REMOVED (this happens for the remaining part when a partial match was detected)
     for (DetectedObject &ro : model_vec_) {
-        auto m_iter = std::find_if( model_obj_matches.begin(), model_obj_matches.end(),[&ro](Match const &m) {return m.model_id == ro.getID(); });
         //ref object was not matched --> new or displaced on other plane
         if (ro.state_ == ObjectState::UNKNOWN) {
             ro.state_ = ObjectState::REMOVED;
@@ -438,7 +438,7 @@ std::vector<Match> ObjectMatching::weightedGraphMatching(std::vector<ObjectHypot
             auto ed = boost::edge(*vi, mate[*vi], g); //returns pair<edge_descriptor, bool>, where bool indicates if edge exists or not
             float edge_weight = boost::get(boost::edge_weight_t(), g, ed.first);
             Eigen::Matrix4f edge_transformation = boost::get(transformation_t(), g, ed.first);
-            std::cout << "{" << g[*vi].name << ", " << g[mate[*vi]].name << "} - " << edge_weight << std::endl;
+            std::cout << "{" << g[*vi].name << ", " << g[mate[*vi]].name << "} - " << std::sqrt(edge_weight) << std::endl;
 
             //remove "_model" and "_object from the IDs (we added that before to be able to distinguish the nodes in the graph
             std::string m_name = g[*vi].name;

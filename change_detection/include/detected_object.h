@@ -30,6 +30,8 @@ struct DetectedObject {
 
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    DetectedObject(){}
+
     DetectedObject(pcl::PointCloud<PointNormal>::Ptr object_cloud, pcl::PointCloud<PointNormal>::Ptr plane_cloud,
                    PlaneStruct supp_plane, ObjectState object_state = UNKNOWN, std::string object_folder_path = "") : unique_id_(++s_id), object_cloud_(object_cloud),
                     plane_cloud_(plane_cloud), supp_plane_(supp_plane), state_(object_state), object_folder_path_(object_folder_path) {}

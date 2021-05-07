@@ -28,9 +28,9 @@ bool comparePoint(std::pair<PointNormal, int> p1, std::pair<PointNormal, int> p2
 }
 
 void ChangeDetection::init(pcl::PointCloud<PointNormal>::Ptr ref_cloud, pcl::PointCloud<PointNormal>::Ptr curr_cloud,
-                           Eigen::Vector4f ref_plane_coeffs, Eigen::Vector4f curr_plane_coeffs,
+                           const Eigen::Vector4f &ref_plane_coeffs, const Eigen::Vector4f &curr_plane_coeffs,
                            pcl::PointCloud<pcl::PointXYZ>::Ptr ref_convex_hull_pts, pcl::PointCloud<pcl::PointXYZ>::Ptr curr_convex_hull_pts,
-                           std::string output_path) {
+                           std::string ppf_model_path, std::string output_path) {
     ref_cloud_= ref_cloud;
     curr_cloud_ = curr_cloud;
     ref_plane_coeffs_ = ref_plane_coeffs;
@@ -38,6 +38,7 @@ void ChangeDetection::init(pcl::PointCloud<PointNormal>::Ptr ref_cloud, pcl::Poi
     curr_convex_hull_pts_ = curr_convex_hull_pts;
     ref_convex_hull_pts_ = ref_convex_hull_pts;
     output_path_ = output_path;
+    ppf_model_path_ = ppf_model_path;
 }
 
 
@@ -183,11 +184,11 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
 
     //------------------Match detected objects against each other with PPF-----------------------
     //depending on if LV was performed before, static objects can be matched
-    std::string model_path = output_path_ + "/model_objects/";
+    std::string debug_model_path = output_path_ + "/model_objects/";
     std::vector<DetectedObject> ref_objects_vec;
     for (size_t o = 0; o < ref_objects.size(); o++) {
-        pcl::PointCloud<PointNormal>::Ptr object_cloud{new pcl::PointCloud<PointNormal>};
-        pcl::PointCloud<PointNormal>::Ptr plane_cloud{new pcl::PointCloud<PointNormal>};
+        pcl::PointCloud<PointNormal>::Ptr object_cloud(new pcl::PointCloud<PointNormal>);
+        pcl::PointCloud<PointNormal>::Ptr plane_cloud(new pcl::PointCloud<PointNormal>);
 
         pcl::ExtractIndices<PointNormal> extract;
         extract.setInputCloud (ref_cloud_);
@@ -202,9 +203,12 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
         extract.filter(*object_cloud);
 
         DetectedObject obj(object_cloud, plane_cloud, ref_objects[o].plane);
-        std::string obj_folder = model_path + std::to_string(obj.getID()); //PPF uses the folder name as model_id!
+        std::string debug_obj_folder = debug_model_path + std::to_string(obj.getID()); //PPF uses the folder name as model_id!
+        boost::filesystem::create_directories(debug_obj_folder);
+        std::string obj_folder = ppf_model_path_ + std::to_string(obj.getID()); //PPF uses the folder name as model_id!
         boost::filesystem::create_directories(obj_folder);
-        pcl::io::savePCDFile(obj_folder + "/3D_model.pcd", *object_cloud); //each detected reference object is saved in a folder for further use with PPF
+        pcl::io::savePCDFile(debug_obj_folder + "/3D_model.pcd", *object_cloud); //each detected reference object is saved in a folder for further use with PPF
+        pcl::io::savePCDFile(obj_folder + "/3D_model.pcd", *object_cloud);
         obj.object_folder_path_ = obj_folder;
         ref_objects_vec.push_back(obj);
     }
@@ -217,9 +221,10 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
     }
 
     std::vector<DetectedObject> curr_objects_vec;
+
     for (size_t o = 0; o < curr_objects.size(); o++) {
-        pcl::PointCloud<PointNormal>::Ptr object_cloud{new pcl::PointCloud<PointNormal>};
-        pcl::PointCloud<PointNormal>::Ptr plane_cloud{new pcl::PointCloud<PointNormal>};
+        pcl::PointCloud<PointNormal>::Ptr object_cloud(new pcl::PointCloud<PointNormal>);
+        pcl::PointCloud<PointNormal>::Ptr plane_cloud(new pcl::PointCloud<PointNormal>);
 
         pcl::ExtractIndices<PointNormal> extract;
         extract.setInputCloud (curr_cloud_);
@@ -235,6 +240,10 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
 
         DetectedObject obj(object_cloud, plane_cloud, curr_objects[o].plane);
         curr_objects_vec.push_back(obj);
+
+        std::string debug_obj_folder = output_path_ + "/current_det_objects/" + std::to_string(obj.getID());
+        boost::filesystem::create_directories(debug_obj_folder);
+        pcl::io::savePCDFileBinary(debug_obj_folder + "/object.pcd", *object_cloud);
     }
 
     if (ref_objects.size() == 0) { //all objects are new in curr
@@ -246,7 +255,7 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
     }
 
     //matches between same plane different timestamps
-    ObjectMatching object_matching(ref_objects_vec, curr_objects_vec, model_path, ppf_config_path_);
+    ObjectMatching object_matching(ref_objects_vec, curr_objects_vec, ppf_model_path_, ppf_config_path_);
     std::vector<Match> matches = object_matching.compute(ref_result, curr_result);
 
     //region growing of static/displaced objects (should create more precise results if e.g. the model was smaller than die object or not precisely aligned
