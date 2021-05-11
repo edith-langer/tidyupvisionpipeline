@@ -475,18 +475,24 @@ int main(int argc, char* argv[])
                     }
                 } else if (ro.state_ == ObjectState::DISPLACED) {
                     ref_displaced_obj[ro.getID()] = ro;
-                } //the state STATIC can be ignored
+                    pot_removed_obj.erase(ro.getID());
+                } else if (ro.state_ == ObjectState::STATIC) {
+                    pot_removed_obj.erase(ro.getID());
+                }
             }
             for (DetectedObject co : curr_result) {
                 if (co.state_ == ObjectState::NEW) {
                     pot_new_obj[co.getID()] = co;
                 } else if (co.state_ == ObjectState::DISPLACED) {
                     curr_displaced_obj[co.getID()] = co;
-                } //the state STATIC can be ignored
+                    pot_new_obj.erase(co.getID());
+                } else if (co.state_ == ObjectState::STATIC) {
+                    pot_new_obj.erase(co.getID());
+                }
             }
 
 
-            //after collecting potential new and removed objects from all planes, try to match them
+            //after collecting potential new and removed objects from the plane, try to match them
             if (pot_removed_obj.size() != 0 && pot_new_obj.size() != 0) {
                 //transform map into vec to be able to call object matching
                 std::vector<DetectedObject> pot_rem_obj_vec, pot_new_obj_vec;
@@ -504,14 +510,21 @@ int main(int argc, char* argv[])
                         }
                     } else if (ro.state_ == ObjectState::DISPLACED) {
                         ref_displaced_obj[ro.getID()] = ro;
-                    } //the state STATIC can be ignored
+                        pot_removed_obj.erase(ro.getID());
+                    } else if (ro.state_ == ObjectState::STATIC) {
+                        pot_removed_obj.erase(ro.getID());
+                    }
+
                 }
                 for (DetectedObject co : curr_result) {
                     if (co.state_ == ObjectState::NEW) {
                         pot_new_obj[co.getID()] = co;
                     } else if (co.state_ == ObjectState::DISPLACED) {
                         curr_displaced_obj[co.getID()] = co;
-                    } //the state STATIC can be ignored
+                        pot_new_obj.erase(co.getID());
+                    }  else if (co.state_ == ObjectState::STATIC) {
+                        pot_new_obj.erase(co.getID());
+                    }
                 }
             }
         }

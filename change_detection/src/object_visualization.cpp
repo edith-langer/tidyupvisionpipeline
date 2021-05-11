@@ -4,8 +4,6 @@ ObjectVisualization::ObjectVisualization(pcl::PointCloud<PointNormal>::Ptr ref_c
                                          std::vector<DetectedObject>  disappeared_objects,  std::vector<DetectedObject> novel_objects,
                                           std::vector<DetectedObject> displaced_ref_objects,  std::vector<DetectedObject> displaced_curr_objects)
 {
-    assert(displaced_curr_objects.size() == displaced_ref_objects.size());
-
     this->ref_cloud = ref_cloud;
     this->disappeared_objects = disappeared_objects;
     this->curr_cloud = curr_cloud;
@@ -54,7 +52,9 @@ void ObjectVisualization::visualize() {
     //Displaced objects: different colors (r and g random and b high number)
     for (size_t o = 0; o < displaced_ref_objects.size(); o++) {
         const DetectedObject &ref_object = displaced_ref_objects[o];
-        const DetectedObject &curr_object = displaced_curr_objects[o];
+        auto curr_obj_iter = std::find_if( displaced_curr_objects.begin(), displaced_curr_objects.end(),[ref_object]
+                (DetectedObject const &o) {return o.match_.model_id == ref_object.getID(); });
+        const DetectedObject &curr_object = *curr_obj_iter;
         pcl::PointCloud<PointRGBA>::Ptr ref_objects_cloud(new pcl::PointCloud<PointRGBA>);
         pcl::PointCloud<PointRGBA>::Ptr curr_objects_cloud(new pcl::PointCloud<PointRGBA>);
         pcl::copyPointCloud(*ref_object.object_cloud_, *ref_objects_cloud);

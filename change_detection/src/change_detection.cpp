@@ -771,6 +771,7 @@ std::vector<pcl::PointIndices> ChangeDetection::removeClusteroutliersBySize(pcl:
     return cluster_indices;
 }
 
+//TODO not only for one plane, but in the end of the whole pipeline!
 //check clusters from new/removed objects if they could belong to a displaced/static cluster
 void ChangeDetection::cleanResult(std::vector<DetectedObject> &detected_objects) {
     for (size_t i = 0; i < detected_objects.size(); i++) {
