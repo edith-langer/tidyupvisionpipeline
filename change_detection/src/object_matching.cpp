@@ -263,123 +263,132 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
 
     std::cout << "Time spent to recognize objects with PPF: " << (ppf_rec_time_sum/1000) << " seconds." << std::endl;
 
-    //TODO what if model_vec[i] is more than once in the match vector??? execute find_if in a loop
-    //define the state of the detected objects based on the found matches
-    for (size_t r = 0; r < model_vec_.size(); r++) {
-        DetectedObject &ro = model_vec_[r];
-        for (std::vector<Match>::iterator match_iter = model_obj_matches.begin(); model_obj_matches.end() != match_iter; match_iter++) {
-            if (match_iter->model_id == ro.getID()) {
-                //a match was found
-                //was it a partial match? was it displaced or static?
-                if (match_iter != model_obj_matches.end()) {
-                    int obj_id = match_iter->object_id;
-                    auto obj_iter = std::find_if( object_vec_.begin(), object_vec_.end(),[&obj_id](DetectedObject const &o) {return o.getID() == obj_id; });
-                    int obj_index = std::distance(object_vec_.begin(), obj_iter); //the position in the object_vec_ vector
+    for (size_t m = 0; m < model_obj_matches.size(); m++) {
+        const Match &match = model_obj_matches[m];
+        int obj_id = match.object_id;
+        int model_id = match.model_id;
+        std::vector<DetectedObject>::iterator co_iter = std::find_if( object_vec_.begin(), object_vec_.end(),[&obj_id](DetectedObject const &o) {return o.getID() == obj_id; });
+        std::vector<DetectedObject>::iterator ro_iter = std::find_if( model_vec_.begin(), model_vec_.end(),[&model_id](DetectedObject const &o) {return o.getID() == model_id; });
 
-                    //get the original model and object clouds for the  match
-                    const pcl::PointCloud<PointNormal>::Ptr model_cloud = ro.object_cloud_;
-                    const pcl::PointCloud<PointNormal>::Ptr object_cloud = obj_iter->object_cloud_;
+        //get the original model and object clouds for the  match
+        const pcl::PointCloud<PointNormal>::Ptr model_cloud = ro_iter->object_cloud_;
+        const pcl::PointCloud<PointNormal>::Ptr object_cloud = co_iter->object_cloud_;
 
-                    //compute distance between object and model
-                    float dist = computeDistance(object_cloud, model_cloud, match_iter->transform);
-                    bool is_static = dist < max_dist_for_being_static;
+        //compute distance between object and model
+        float dist = computeDistance(object_cloud, model_cloud, match.transform);
+        bool is_static = dist < max_dist_for_being_static;
 
-                    pcl::PointCloud<PointNormal>::Ptr model_aligned(new pcl::PointCloud<PointNormal>());
-                    pcl::transformPointCloudWithNormals(*model_cloud, *model_aligned, match_iter->transform);
+        pcl::PointCloud<PointNormal>::Ptr model_aligned(new pcl::PointCloud<PointNormal>());
+        pcl::transformPointCloudWithNormals(*model_cloud, *model_aligned, match.transform);
 
-                    //remove points from MODEL object input cloud
-                    SceneDifferencingPoints scene_diff(0.02);
-                    std::vector<int> diff_ind;
-                    std::vector<int> corresponding_ind;
-                    SceneDifferencingPoints::Cloud::Ptr model_diff_cloud = scene_diff.computeDifference(model_aligned, object_cloud, diff_ind, corresponding_ind);
+        //remove points from MODEL object input cloud
+        SceneDifferencingPoints scene_diff(0.02);
+        std::vector<int> diff_ind;
+        std::vector<int> corresponding_ind;
+        SceneDifferencingPoints::Cloud::Ptr model_diff_cloud = scene_diff.computeDifference(model_aligned, object_cloud, diff_ind, corresponding_ind);
 
-                    if (diff_ind.size() < 100) { //if less than 100 points left, we do not split the model object
-                        if (is_static) {
-                            ro.state_ = ObjectState::STATIC;
-                            ro.match_ = *match_iter;
-                        } else {
-                            ro.state_ = ObjectState::DISPLACED;
-                            ro.match_ = *match_iter;
-                        }
-                    }
-                    //split the model cloud
-                    else {
-                        //the part that is matched
-                        pcl::PointCloud<PointNormal>::Ptr matched_model_part(new pcl::PointCloud<PointNormal>);
-                        pcl::ExtractIndices<PointNormal> extract;
-                        extract.setInputCloud (model_aligned);
-                        pcl::PointIndices::Ptr c_ind(new pcl::PointIndices());
-                        c_ind->indices = diff_ind;
-                        extract.setIndices(c_ind);
-                        extract.setKeepOrganized(false);
-                        extract.setNegative (true);
-                        extract.filter(*matched_model_part);
-                        //transform back to original scene
-                        pcl::transformPointCloudWithNormals(*matched_model_part, *matched_model_part, match_iter->transform.inverse());
-                        pcl::transformPointCloudWithNormals(*model_diff_cloud, *model_diff_cloud, match_iter->transform.inverse());
+        if (diff_ind.size() < 100) { //if less than 100 points left, we do not split the model object
+            if (is_static) {
+                ro_iter->state_ = ObjectState::STATIC;
+                ro_iter->match_ = match;
+            } else {
+                ro_iter->state_ = ObjectState::DISPLACED;
+                ro_iter->match_ = match;
+            }
+        }
+        //split the model cloud
+        else {
+            //the part that is matched
+            pcl::PointCloud<PointNormal>::Ptr matched_model_part(new pcl::PointCloud<PointNormal>);
+            pcl::ExtractIndices<PointNormal> extract;
+            extract.setInputCloud (model_aligned);
+            pcl::PointIndices::Ptr c_ind(new pcl::PointIndices());
+            c_ind->indices = diff_ind;
+            extract.setIndices(c_ind);
+            extract.setKeepOrganized(false);
+            extract.setNegative (true);
+            extract.filter(*matched_model_part);
+            //transform back to original scene
+            pcl::transformPointCloudWithNormals(*matched_model_part, *matched_model_part, match.transform.inverse());
+            pcl::transformPointCloudWithNormals(*model_diff_cloud, *model_diff_cloud, match.transform.inverse());
 
-                        //the remaining part of the model
-                        DetectedObject diff_model_part(model_diff_cloud, ro.plane_cloud_, ro.supp_plane_, ObjectState::REMOVED, "");
-                        model_vec_.push_back((diff_model_part));
+            //the matched part of the model
+            ro_iter->object_cloud_=matched_model_part;
+            ro_iter->state_ =(is_static ? ObjectState::STATIC : ObjectState::DISPLACED);
+            ro_iter->match_ = match;
+            ro_iter->object_folder_path_="";
 
-                        //the matched part of the model
-                        model_vec_[r].object_cloud_=matched_model_part;
-                        model_vec_[r].state_ =(is_static ? ObjectState::STATIC : ObjectState::DISPLACED);
-                        model_vec_[r].match_ = *match_iter;
-                        model_vec_[r].object_folder_path_="";
-                    }
+            //the remaining part of the model
+            DetectedObject diff_model_part(model_diff_cloud, ro_iter->plane_cloud_, ro_iter->supp_plane_, ObjectState::REMOVED, "");
 
-                    //remove points from OBJECT object input cloud
-                    diff_ind.clear(); corresponding_ind.clear();
-                    pcl::PointCloud<PointNormal>::Ptr object_diff_cloud = scene_diff.computeDifference(object_cloud, model_aligned, diff_ind, corresponding_ind);
-
-                    if (diff_ind.size() < 100) { //if less than 100 points left, we do not split the object
-                        if (is_static) {
-                            obj_iter->state_ = ObjectState::STATIC;
-                            obj_iter->match_ = *match_iter;
-                        } else {
-                            obj_iter->state_ = ObjectState::DISPLACED;
-                            obj_iter->match_ = *match_iter;
-                        }
-                    }
-                    //split the object cloud
-                    else {
-                        //the part that is matched
-                        pcl::PointCloud<PointNormal>::Ptr matched_object_part(new pcl::PointCloud<PointNormal>);
-                        pcl::ExtractIndices<PointNormal> extract;
-                        pcl::PointIndices::Ptr c_ind(new pcl::PointIndices());
-                        extract.setInputCloud (object_cloud);
-                        c_ind->indices = diff_ind;
-                        extract.setIndices(c_ind);
-                        extract.setKeepOrganized(false);
-                        extract.setNegative (true);
-                        extract.filter(*matched_object_part);
-
-                        //the remaining part of the object
-                        DetectedObject diff_object_part(object_diff_cloud, obj_iter->plane_cloud_, obj_iter->supp_plane_, ObjectState::NEW, "");
-                        object_vec_.push_back(diff_object_part);
-                        //ATTENTION: The obj_iter is invalid now because of the push_back before. Vector re-allocates and invalidates pointers
-
-                        //the matched part of the object
-                        object_vec_[obj_index].object_cloud_=matched_object_part;
-                        object_vec_[obj_index].state_ = (is_static ? ObjectState::STATIC : ObjectState::DISPLACED);
-                        object_vec_[obj_index].match_ = *match_iter;
-                        object_vec_[obj_index].object_folder_path_="";
-
-                        //save the new partly matched object
-                        boost::filesystem::path model_path_orig(model_path_);
-                        std::string cloud_matches_dir =  model_path_orig.remove_trailing_separator().parent_path().string() + "/matches/object" + std::to_string(object_vec_[obj_index].getID()) + "_part";
-                        boost::filesystem::create_directories(cloud_matches_dir);
-                        std::string result_cloud_path = cloud_matches_dir + "/matchResult_model_" + std::to_string(match_iter->model_id) +"_conf_" + std::to_string(match_iter->confidence)+ "_" +
-                                (ppf_params.ppf_rec_pipeline_.use_color_ ? "_color" : "");
-                        saveCloudResults(matched_object_part, model_aligned, model_aligned, result_cloud_path); //we don't have access to the not refined model
-
-
-                        //pcl::io::savePCDFile("/home/edith/object_part.pcd", *matched_object_part);
-                        //pcl::io::savePCDFile("/home/edith/object_remaining.pcd", *object_diff_cloud);
-                    }
+            //update matches with the new ID! Except for co_iter
+            for (size_t k = 0; k < model_obj_matches.size(); k++) {
+                if (model_obj_matches[k].model_id == ro_iter->getID() && model_obj_matches[k].object_id != ro_iter->match_.object_id) {
+                    model_obj_matches[k].model_id = diff_model_part.getID();
                 }
             }
+
+
+            //ATTENTION: The ro_iter is invalid now because of the push_back. Vector re-allocates and invalidates pointers
+            model_vec_.push_back((diff_model_part));
+        }
+
+        //remove points from OBJECT object input cloud
+        diff_ind.clear(); corresponding_ind.clear();
+        pcl::PointCloud<PointNormal>::Ptr object_diff_cloud = scene_diff.computeDifference(object_cloud, model_aligned, diff_ind, corresponding_ind);
+
+        if (diff_ind.size() < 100) { //if less than 100 points left, we do not split the object
+            if (is_static) {
+                co_iter->state_ = ObjectState::STATIC;
+                co_iter->match_ = match;
+            } else {
+                co_iter->state_ = ObjectState::DISPLACED;
+                co_iter->match_ = match;
+            }
+        }
+        //split the object cloud
+        else {
+            //the part that is matched
+            pcl::PointCloud<PointNormal>::Ptr matched_object_part(new pcl::PointCloud<PointNormal>);
+            pcl::ExtractIndices<PointNormal> extract;
+            pcl::PointIndices::Ptr c_ind(new pcl::PointIndices());
+            extract.setInputCloud (object_cloud);
+            c_ind->indices = diff_ind;
+            extract.setIndices(c_ind);
+            extract.setKeepOrganized(false);
+            extract.setNegative (true);
+            extract.filter(*matched_object_part);
+
+            //the matched part of the object
+            co_iter->object_cloud_=matched_object_part;
+            co_iter->state_ = (is_static ? ObjectState::STATIC : ObjectState::DISPLACED);
+            co_iter->match_ = match;
+            co_iter->object_folder_path_="";
+
+            //the remaining part of the object
+            DetectedObject diff_object_part(object_diff_cloud, co_iter->plane_cloud_, co_iter->supp_plane_, ObjectState::NEW, "");
+
+            //update matches with the new ID! Except for co_iter
+            for (size_t k = 0; k < model_obj_matches.size(); k++) {
+                if (model_obj_matches[k].object_id == co_iter->getID() && model_obj_matches[k].model_id != co_iter->match_.model_id) {
+                    model_obj_matches[k].object_id = diff_object_part.getID();
+                }
+            }
+
+            //ATTENTION: The co_iter is invalid now because of the push_back. Vector re-allocates and invalidates pointers
+            object_vec_.push_back(diff_object_part);
+
+            //save the new partly matched object
+            boost::filesystem::path model_path_orig(model_path_);
+            std::string cloud_matches_dir =  model_path_orig.remove_trailing_separator().parent_path().string() + "/matches/object" + std::to_string(match.object_id) + "_part";
+            boost::filesystem::create_directories(cloud_matches_dir);
+            std::string result_cloud_path = cloud_matches_dir + "/matchResult_model_" + std::to_string(match.model_id) +"_conf_" + std::to_string(match.confidence)+ "_" +
+                    (ppf_params.ppf_rec_pipeline_.use_color_ ? "_color" : "");
+            saveCloudResults(matched_object_part, model_aligned, model_aligned, result_cloud_path); //we don't have access to the not refined model
+
+
+            //pcl::io::savePCDFile("/home/edith/object_part.pcd", *matched_object_part);
+            //pcl::io::savePCDFile("/home/edith/object_remaining.pcd", *object_diff_cloud);
         }
     }
 
