@@ -21,6 +21,7 @@
 #include <boost/filesystem.hpp>
 
 #include <v4r/geometry/normals.h>
+#include <PPFRecognizerParameter.h>
 
 #include "scene_differencing_points.h"
 #include "local_object_verification.h"
@@ -95,6 +96,7 @@ private:
     void filterPlanarAndColor(std::vector<PlaneWithObjInd>& objects, pcl::PointCloud<PointNormal>::Ptr cloud, std::string path, float _plane_dist_thr=0.005, int _nr_bins=10 );
     double checkColorSimilarity(PlaneWithObjInd& object, pcl::PointCloud<PointNormal>::Ptr cloud, int _nr_bins=10) ;
     void cleanResult(std::vector<DetectedObject> &detected_objects);
+    void matchAndRemoveObjects (pcl::PointCloud<PointNormal>::Ptr remaining_scene_points, pcl::PointCloud<PointNormal>::Ptr full_object_cloud, std::vector<PlaneWithObjInd> &extracted_objects);
 };
 
 #endif // CHANGE_DETECTION_H

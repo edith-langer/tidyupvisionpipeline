@@ -492,7 +492,7 @@ bool ObjectMatching::isModelBelowPlane(pcl::PointCloud<PointNormal>::Ptr model, 
     pass_plane_object.setFilterLimits(minPoint.y - object_plane_margin, maxPoint.y + object_plane_margin);
     pass_plane_object.filter(*cropped_object_plane);
 
-    int nr_plane_points;
+    int nr_plane_points=0;
     double plane_z_value_avg = 0.0;
     for (size_t i = 0; i < cropped_object_plane->size(); i++) {
         PointNormal &p = cropped_object_plane->points[i];

@@ -70,6 +70,10 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
     pass.setKeepOrganized(true);
     pass.filter(*cropped_cloud);
 
+    if (cropped_cloud->empty()) {
+        return PlaneWithObjInd(); //return empty object
+    }
+
     pcl::io::savePCDFileBinary(result_path_ + "/cropped_cloud.pcd", *cropped_cloud);
 
 
@@ -153,10 +157,10 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
     // build the condition
     pcl::PointCloud<PointNormal>::Ptr cloud_plane_filtered(new pcl::PointCloud<PointNormal>);
     pcl::ConditionAnd<PointNormal>::Ptr range_cond (new pcl::ConditionAnd<PointNormal> ());
-    range_cond->addComparison (pcl::FieldComparison<PointNormal>::ConstPtr (new pcl::FieldComparison<PointNormal> ("normal_x", pcl::ComparisonOps::GT, -0.2)));
-    range_cond->addComparison (pcl::FieldComparison<PointNormal>::ConstPtr (new pcl::FieldComparison<PointNormal> ("normal_x", pcl::ComparisonOps::LT, 0.2)));
-    range_cond->addComparison (pcl::FieldComparison<PointNormal>::ConstPtr (new pcl::FieldComparison<PointNormal> ("normal_y", pcl::ComparisonOps::GT, -0.2)));
-    range_cond->addComparison (pcl::FieldComparison<PointNormal>::ConstPtr (new pcl::FieldComparison<PointNormal> ("normal_y", pcl::ComparisonOps::LT, 0.2)));
+    range_cond->addComparison (pcl::FieldComparison<PointNormal>::ConstPtr (new pcl::FieldComparison<PointNormal> ("normal_x", pcl::ComparisonOps::GT, -0.25))); //~15 deg
+    range_cond->addComparison (pcl::FieldComparison<PointNormal>::ConstPtr (new pcl::FieldComparison<PointNormal> ("normal_x", pcl::ComparisonOps::LT, 0.25)));
+    range_cond->addComparison (pcl::FieldComparison<PointNormal>::ConstPtr (new pcl::FieldComparison<PointNormal> ("normal_y", pcl::ComparisonOps::GT, -0.25)));
+    range_cond->addComparison (pcl::FieldComparison<PointNormal>::ConstPtr (new pcl::FieldComparison<PointNormal> ("normal_y", pcl::ComparisonOps::LT, 0.25)));
     // build the filter
     pcl::ConditionalRemoval<PointNormal> condrem;
     condrem.setCondition (range_cond);

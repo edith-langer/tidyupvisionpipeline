@@ -80,6 +80,8 @@ public:
                    std::string model_path, std::string cfg_path);
 
     std::vector<Match> compute(std::vector<DetectedObject> &ref_result, std::vector<DetectedObject> &curr_result);
+    static std::tuple<float, float> computeModelFitness(pcl::PointCloud<PointNormal>::Ptr object, pcl::PointCloud<PointNormal>::Ptr model,
+                                                 v4r::apps::PPFRecognizerParameter param);
 
 private:
     std::vector<DetectedObject> model_vec_;
@@ -87,8 +89,6 @@ private:
     std::string model_path_;
     std::string cfg_path_;
 
-    std::tuple<float, float> computeModelFitness(pcl::PointCloud<PointNormal>::Ptr object, pcl::PointCloud<PointNormal>::Ptr model,
-                                                 v4r::apps::PPFRecognizerParameter param);
     void saveCloudResults(pcl::PointCloud<PointNormal>::Ptr object_cloud, pcl::PointCloud<PointNormal>::Ptr model_aligned,
                           pcl::PointCloud<PointNormal>::Ptr model_aligned_refined, std::string path);
     bool isModelBelowPlane(pcl::PointCloud<PointNormal>::Ptr model, pcl::PointCloud<PointNormal>::Ptr plane_cloud);
