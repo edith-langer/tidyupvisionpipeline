@@ -55,6 +55,9 @@ std::map<int, DetectedObject> pot_removed_obj;
 std::map<int, DetectedObject> ref_displaced_obj;
 std::map<int, DetectedObject> curr_displaced_obj;
 
+std::string ppf_model_path;
+std::string result_path;
+
 
 std::vector<DetectedObject> fromMapToValVec(std::map<int, DetectedObject> map) {
     //transform map into vec to be able to call object matching
@@ -112,17 +115,56 @@ void updateModelInput(DetectedObject ro, std::string ppf_model_path, std::string
     if (boost::filesystem::exists(orig_path)) {
         boost::filesystem::path dest_folder = result_path + "/model_partially_matched/" + std::to_string(ro.getID());
         boost::filesystem::create_directories(dest_folder);
+        //count pcd-files in the folder
+        int nr_pcd_files = 0;
+        boost::filesystem::directory_iterator end_iter; // Default constructor for an iterator is the end iterator
+        for (boost::filesystem::directory_iterator iter(dest_folder); iter != end_iter; ++iter) {
+            if (iter->path().extension() == ".pcd")
+                ++nr_pcd_files;
+        }
+
         //copy the folder to another directory. The model is already matched and should not be used anymore
         for (const auto& dirEnt : boost::filesystem::recursive_directory_iterator{orig_path})
         {
-            const auto& path = dirEnt.path();
-            boost::filesystem::copy(path, dest_folder / path.filename());
-            std::cout << "Copy " << path << " to " << (dest_folder / path.filename()) << std::endl;
+            if (dirEnt.path().extension() == ".pcd") {
+                const auto& path = dirEnt.path();
+                boost::filesystem::path dest_filename = path.stem().string() + std::to_string(nr_pcd_files) + path.extension().string();
+                boost::filesystem::copy(path, dest_folder / dest_filename);
+                std::cout << "Copy " << path << " to " << (dest_folder / path.filename()) << std::endl;
+            }
         }
     }
     boost::filesystem::remove_all(orig_path);
     boost::filesystem::create_directories(orig_path);
     pcl::io::savePCDFile(orig_path + "/3D_model.pcd", *ro.object_cloud_); //PPF will create a new model with the new cloud
+}
+
+void updateDetectedObjects(std::vector<DetectedObject>& ref_result, std::vector<DetectedObject>& curr_result) {
+    for (DetectedObject ro : ref_result) {
+        if (ro.state_ == ObjectState::REMOVED) {
+            pot_removed_obj[ro.getID()] = ro;
+            //means that there was a partial match and a new ppf-model is needed
+            if (ro.object_folder_path_ == "") {
+                updateModelInput(ro, ppf_model_path, result_path);
+            }
+        } else if (ro.state_ == ObjectState::DISPLACED) {
+            ref_displaced_obj[ro.getID()] = ro;
+            pot_removed_obj.erase(ro.getID());
+        } else if (ro.state_ == ObjectState::STATIC) {
+            pot_removed_obj.erase(ro.getID());
+        }
+
+    }
+    for (DetectedObject co : curr_result) {
+        if (co.state_ == ObjectState::NEW) {
+            pot_new_obj[co.getID()] = co;
+        } else if (co.state_ == ObjectState::DISPLACED) {
+            curr_displaced_obj[co.getID()] = co;
+            pot_new_obj.erase(co.getID());
+        }  else if (co.state_ == ObjectState::STATIC) {
+            pot_new_obj.erase(co.getID());
+        }
+    }
 }
 
 //map of map because for one plane several occurrences are possible
@@ -399,7 +441,6 @@ int main(int argc, char* argv[])
     /// Parse command line arguments
     std::string reference_path = argv[1];
     std::string current_path = argv[2];
-    std::string result_path="";
     std::string ppf_config_path_path="";
     pcl::console::parse(argc, argv, "-r", result_path);
     pcl::console::parse(argc, argv, "-c", ppf_config_path_path);
@@ -410,7 +451,7 @@ int main(int argc, char* argv[])
     boost::filesystem::create_directories(result_path);
 
     //----------------------------setup ppf model folder-------------------------------
-    std::string ppf_model_path = result_path + "/model_objects/";
+    ppf_model_path = result_path + "/model_objects/";
     boost::filesystem::create_directories(ppf_model_path);
 
     /// Input: Two reconstructed POI in map frame with RGB, Normals and Lables (?), coefficients of the plane/plane points
@@ -466,30 +507,7 @@ int main(int argc, char* argv[])
 
             //TODO check if all existing model folders are also present in ref_result
             //all detected objects labeled as removed (ref_objects) or new (curr_objects) could be placed on another plane
-            for (DetectedObject ro : ref_result) {
-                if (ro.state_ == ObjectState::REMOVED) {
-                    pot_removed_obj[ro.getID()] = ro;
-                    //means that there was a partial match and a new ppf-model is needed
-                    if (ro.object_folder_path_ == "") {
-                        updateModelInput(ro, ppf_model_path, result_path);
-                    }
-                } else if (ro.state_ == ObjectState::DISPLACED) {
-                    ref_displaced_obj[ro.getID()] = ro;
-                    pot_removed_obj.erase(ro.getID());
-                } else if (ro.state_ == ObjectState::STATIC) {
-                    pot_removed_obj.erase(ro.getID());
-                }
-            }
-            for (DetectedObject co : curr_result) {
-                if (co.state_ == ObjectState::NEW) {
-                    pot_new_obj[co.getID()] = co;
-                } else if (co.state_ == ObjectState::DISPLACED) {
-                    curr_displaced_obj[co.getID()] = co;
-                    pot_new_obj.erase(co.getID());
-                } else if (co.state_ == ObjectState::STATIC) {
-                    pot_new_obj.erase(co.getID());
-                }
-            }
+            updateDetectedObjects(ref_result, curr_result);
 
 
             //after collecting potential new and removed objects from the plane, try to match them
@@ -501,38 +519,64 @@ int main(int argc, char* argv[])
                 ObjectMatching matching(pot_rem_obj_vec, pot_new_obj_vec, ppf_model_path, ppf_config_path_path);
                 ref_result.clear(); curr_result.clear();
                 matching.compute(ref_result, curr_result);
-                for (DetectedObject ro : ref_result) {
-                    if (ro.state_ == ObjectState::REMOVED) {
-                        pot_removed_obj[ro.getID()] = ro;
-                        //means that there was a partial match and a new ppf-model is needed
-                        if (ro.object_folder_path_ == "") {
-                            updateModelInput(ro, ppf_model_path, result_path);
-                        }
-                    } else if (ro.state_ == ObjectState::DISPLACED) {
-                        ref_displaced_obj[ro.getID()] = ro;
-                        pot_removed_obj.erase(ro.getID());
-                    } else if (ro.state_ == ObjectState::STATIC) {
-                        pot_removed_obj.erase(ro.getID());
-                    }
 
-                }
-                for (DetectedObject co : curr_result) {
-                    if (co.state_ == ObjectState::NEW) {
-                        pot_new_obj[co.getID()] = co;
-                    } else if (co.state_ == ObjectState::DISPLACED) {
-                        curr_displaced_obj[co.getID()] = co;
-                        pot_new_obj.erase(co.getID());
-                    }  else if (co.state_ == ObjectState::STATIC) {
-                        pot_new_obj.erase(co.getID());
-                    }
-                }
+                updateDetectedObjects(ref_result, curr_result);
             }
         }
     }
 
 
-    //TODO extract objects from all planes where is_checked=false and try to match them
+    //extract objects from all planes where is_checked=false and try to match them
+    for (std::map<int, ReconstructedPlane>::iterator ref_it = ref_rec_planes.begin(); ref_it != ref_rec_planes.end(); ref_it++ ) {
+        if (ref_it->second.is_checked == false) {
+            std::string plane_comparison_path = result_path + "/ref_" + std::to_string(ref_it->first);
+            boost::filesystem::create_directories(plane_comparison_path);
+            pcl::io::savePCDFile(plane_comparison_path + "/ref_cloud.pcd", *ref_it->second.cloud);
 
+            std::vector<DetectedObject> ref_result, curr_result;
+            ChangeDetection change_detection(ppf_config_path_path);
+            pcl::PointCloud<PointNormal>::Ptr fake_cloud(new pcl::PointCloud<PointNormal>);
+            pcl::PointCloud<pcl::PointXYZ>::Ptr fake_hull_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+            change_detection.init(ref_it->second.cloud, fake_cloud,
+                                  ref_it->second.plane_coeffs, Vector4f_NotAligned(),
+                                  ref_it->second.convex_hull_cloud, fake_hull_cloud,
+                                  ppf_model_path, plane_comparison_path);
+            change_detection.compute(ref_result, curr_result);
+            updateDetectedObjects(ref_result, curr_result);
+        }
+    }
+    for (std::map<int, ReconstructedPlane>::iterator curr_it = curr_rec_planes.begin(); curr_it != curr_rec_planes.end(); curr_it++ ) {
+        if (curr_it->second.is_checked == false) {
+            std::string plane_comparison_path = result_path + "/curr_" + std::to_string(curr_it->first);
+            boost::filesystem::create_directories(plane_comparison_path);
+            pcl::io::savePCDFile(plane_comparison_path + "/curr_cloud.pcd", *curr_it->second.cloud);
+
+            std::vector<DetectedObject> ref_result, curr_result;
+            ChangeDetection change_detection(ppf_config_path_path);
+            pcl::PointCloud<PointNormal>::Ptr fake_cloud(new pcl::PointCloud<PointNormal>);
+            pcl::PointCloud<pcl::PointXYZ>::Ptr fake_hull_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+            change_detection.init(fake_cloud, curr_it->second.cloud,
+                                  Vector4f_NotAligned(), curr_it->second.plane_coeffs,
+                                  fake_hull_cloud, curr_it->second.convex_hull_cloud,
+                                  ppf_model_path, plane_comparison_path);
+            change_detection.compute(ref_result, curr_result);
+            updateDetectedObjects(ref_result, curr_result);
+        }
+    }
+
+    //one last chance to match objects
+    //after collecting potential new and removed objects from the plane, try to match them
+    if (pot_removed_obj.size() != 0 && pot_new_obj.size() != 0) {
+        //transform map into vec to be able to call object matching
+        std::vector<DetectedObject> pot_rem_obj_vec, pot_new_obj_vec;
+        pot_rem_obj_vec = fromMapToValVec(pot_removed_obj);
+        pot_new_obj_vec = fromMapToValVec(pot_new_obj);
+        ObjectMatching matching(pot_rem_obj_vec, pot_new_obj_vec, ppf_model_path, ppf_config_path_path);
+        std::vector<DetectedObject> ref_result, curr_result;
+        matching.compute(ref_result, curr_result);
+
+        updateDetectedObjects(ref_result, curr_result);
+    }
 
 
     //all pot. moved objects are in the end either removed or new
