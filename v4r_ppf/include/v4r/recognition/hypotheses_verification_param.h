@@ -93,7 +93,7 @@ struct HV_Parameter {
       0.8f;  ///< inner product for which the fit of model and scene surface normals is
              /// exactly half
   float inlier_threshold_color_ =
-      30.f;  ///< allowed chrominance (AB channel of LAB color space) variance for a point of an
+      20.f;  ///< allowed chrominance (AB channel of LAB color space) variance for a point of an
              /// object hypotheses to be considered explained by a corresponding scene point
 
   NormalEstimatorParameter normal_params_;

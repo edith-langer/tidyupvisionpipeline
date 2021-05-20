@@ -18,14 +18,17 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 find_package(Boost REQUIRED)
 find_package(Boost REQUIRED COMPONENTS program_options)
 
-SET(CMAKE_PREFIX_PATH "/home/edith/Software/pcl-1.8_icp/build/install")
-SET(PCL_DIR "/home/edith/Software/pcl-1.8_icp/build")
-SET(PCL_INCLUDE_DIRS "/home/edith/Software/pcl-1.8_icp/build/install/include/pcl-1.8")
+find_package(Eigen3 REQUIRED)
+
+SET(CMAKE_PREFIX_PATH "/home/edith/Software/pcl-1.10.0/build/install")
+SET(PCL_DIR "/home/edith/Software/pcl-1.10.0/build")
+SET(PCL_INCLUDE_DIRS "/home/edith/Software/pcl-1.10.0/build/install/include/pcl-1.10")
+list(APPEND CMAKE_MODULE_PATH "/home/edith/Software/pcl-1.10.0/cmake/Modules")
 
 #set(OpenCV_DIR /home/edith/Software/opencv/build/install/lib/cmake/opencv4)
 #include_directories(${OpenCV_INCLUDE_DIRS})
 
-find_package(PCL 1.8 REQUIRED COMPONENTS
+find_package(PCL REQUIRED COMPONENTS
     common
     keypoints
     search
@@ -57,7 +60,6 @@ find_package(OpenMP REQUIRED)
 
 find_package(OpenCV 3 REQUIRED)
 
-find_package(pybind11 CONFIG REQUIRED)
 
 ## collect include and source files
 # yes i know file(GLOB ... is not the recommended way to do this
@@ -79,12 +81,6 @@ add_library(ppf STATIC ${PPF_SOURCES})
 add_library(ppf-recognizer STATIC ${RECOGNIZER_SOURCES})
 
 add_executable(test_ppf_recognizer ${CMAKE_CURRENT_SOURCE_DIR}/src/test_ppf_recognizer.cpp)
-
-pybind11_add_module(pyppf
-  src/ppf_python_bindings.cpp
-  src/recognition_pipeline.cpp
-  src/ppf_recognition_pipeline.cpp
-)
 
 ## specify dependencies
 target_include_directories(v4r-extracts
@@ -131,15 +127,6 @@ target_link_libraries(test_ppf_recognizer
     ppf-recognizer
     Boost::program_options
     PCL::PCL
-)
-
-# target_include_directories(pyppf PRIVATE ${PCL_INCLUDE_DIRS})
-target_link_libraries(pyppf
-  PRIVATE ppf
-          v4r-extracts
-          Boost::program_options
-          ${OpenCV_LIBS}
-          PCL::PCL
 )
 
 
