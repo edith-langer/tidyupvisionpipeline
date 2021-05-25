@@ -297,8 +297,8 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
     std::vector<Match> matches = object_matching.compute(ref_result, curr_result);
 
     //region growing of static/displaced objects (should create more precise results if e.g. the model was smaller than die object or not precisely aligned
-    cleanResult(ref_result);
-    cleanResult(curr_result);
+    //cleanResult(ref_result);
+    //cleanResult(curr_result);
 
     //removeClusterOutliers
     for (DetectedObject o : ref_result) {
