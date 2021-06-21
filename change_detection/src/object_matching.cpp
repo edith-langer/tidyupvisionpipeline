@@ -84,9 +84,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
     // use recognizer
     //---------------------------------------------------------------------------
     //std::vector<std::string> objects_to_look_for{};   // empty vector means look for all objects
-    std::vector<std::string> objects_to_look_for;
-    for (DetectedObject m : model_vec_)
-        objects_to_look_for.push_back(std::to_string(m.getID()));
+
 
     for (size_t i = 0; i < object_vec_.size(); i++) {
 
@@ -94,13 +92,27 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
         pcl::PointCloud<pcl::Normal>::Ptr object_normals(new pcl::PointCloud<pcl::Normal>);
         pcl::PointCloud<PointRGB>::Ptr object_rgb(new pcl::PointCloud<PointRGB>);
 
-        pcl::copyPointCloud(*object_vec_[i].object_cloud_, *object_rgb);
-        pcl::copyPointCloud(*object_vec_[i].object_cloud_, *object_normals);
+        pcl::copyPointCloud(*object_vec_[i].getObjectCloud(), *object_rgb);
+        pcl::copyPointCloud(*object_vec_[i].getObjectCloud(), *object_normals);
 
         ObjectHypothesesStruct object_hypotheses;
         object_hypotheses.object_id = object_vec_[i].getID();
-        object_hypotheses.object_cloud = object_vec_[i].object_cloud_;
+        object_hypotheses.object_cloud = object_vec_[i].getObjectCloud();
 
+        //choose the models that should be used with the recognizer
+        std::vector<std::string> objects_to_look_for;
+        for (DetectedObject m : model_vec_) {
+            //if we haven't tried to match this object with this model
+            if (object_vec_[i].already_checked_model_ids.find(m.getID()) == object_vec_[i].already_checked_model_ids.end())
+            {
+                objects_to_look_for.push_back(std::to_string(m.getID()));
+                object_vec_[i].already_checked_model_ids.insert(m.getID());
+            }
+        }
+        if (objects_to_look_for.size() == 0) { //otherwise the recognizer checks for all objects in the model folder
+            std::cout << "No model that has not been checked." << object_vec_[i].getID() << std::endl;
+            continue;
+        }
 
         //call the recognizer with object normals
         auto start = std::chrono::high_resolution_clock::now();
@@ -120,7 +132,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
         boost::filesystem::path model_path_orig(model_path_);
         std::string cloud_matches_dir =  model_path_orig.remove_trailing_separator().parent_path().string() + "/matches/object" + std::to_string(object_vec_[i].getID());
         boost::filesystem::create_directories(cloud_matches_dir);
-        pcl::io::savePCDFile(cloud_matches_dir + "/object.pcd", *object_vec_[i].object_cloud_);
+        pcl::io::savePCDFile(cloud_matches_dir + "/object.pcd", *object_vec_[i].getObjectCloud());
         // use results
         for (auto& hg : hypothesis_groups) {
             for (auto& h : hg.ohs_) {
@@ -140,8 +152,8 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
                 }
 
                 //compute confidence based on normals and color between object and model
-                object_hypotheses.obj_pts_not_explained_cloud = object_vec_[i].object_cloud_;
-                std::tuple<float,float> obj_model_conf = computeModelFitness(object_vec_[i].object_cloud_, model_aligned_refined, ppf_params);
+                object_hypotheses.obj_pts_not_explained_cloud = object_vec_[i].getObjectCloud();
+                std::tuple<float,float> obj_model_conf = computeModelFitness(object_vec_[i].getObjectCloud(), model_aligned_refined, ppf_params);
 
                 //TODO: combined or max fitness score?
                 //h->confidence_ = (std::get<0>(obj_model_conf) + std::get<1>(obj_model_conf)) / 2;
@@ -150,7 +162,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
 
                 std::string result_cloud_path = cloud_matches_dir + "/matchResult_model_" + h->model_id_ +"_conf_" + std::to_string(h->confidence_)+ "_" +
                         (ppf_params.ppf_rec_pipeline_.use_color_ ? "_color" : "");
-                saveCloudResults(object_vec_[i].object_cloud_, model_aligned, model_aligned_refined, result_cloud_path);
+                saveCloudResults(object_vec_[i].getObjectCloud(), model_aligned, model_aligned_refined, result_cloud_path);
             }
             // do non-maxima surpression on all hypotheses in a hypotheses group based on model fitness (i.e. select only the
             // one hypothesis in group with best confidence score)
@@ -172,7 +184,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
     //to be able to separate objects, do this as long as a result can be found
     std::map<int, pcl::PointCloud<PointNormal>::Ptr> model_id_cloud;
     for (size_t m = 0; m < model_vec_.size(); m++) {
-        model_id_cloud.insert(std::make_pair(model_vec_[m].getID(), model_vec_[m].object_cloud_));
+        model_id_cloud.insert(std::make_pair(model_vec_[m].getID(), model_vec_[m].getObjectCloud()));
     }
 
     std::vector<Match> model_obj_matches;
@@ -195,7 +207,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
             //remove points from original object input cloud
             pcl::SegmentDifferences<PointNormal> diff;
             diff.setInputCloud(global_scene_hypotheses[scene_ind].obj_pts_not_explained_cloud);
-            diff.setDistanceThreshold(0.02*0.02); //sqr_thr
+            diff.setDistanceThreshold(0.01*0.01); //sqr_thr
             typename pcl::PointCloud<PointNormal>::ConstPtr model_cloud = rec.getModel((*model_hyp_iter).ohs_[0]->model_id_); //second paramater: resolution in mm
             typename pcl::PointCloud<PointNormal>::Ptr model_aligned_refined(new pcl::PointCloud<PointNormal>());
             pcl::copyPointCloud(*model_cloud, *model_aligned_refined);
@@ -271,8 +283,8 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
         std::vector<DetectedObject>::iterator ro_iter = std::find_if( model_vec_.begin(), model_vec_.end(),[&model_id](DetectedObject const &o) {return o.getID() == model_id; });
 
         //get the original model and object clouds for the  match
-        const pcl::PointCloud<PointNormal>::Ptr model_cloud = ro_iter->object_cloud_;
-        const pcl::PointCloud<PointNormal>::Ptr object_cloud = co_iter->object_cloud_;
+        const pcl::PointCloud<PointNormal>::Ptr model_cloud = ro_iter->getObjectCloud();
+        const pcl::PointCloud<PointNormal>::Ptr object_cloud = co_iter->getObjectCloud();
 
         //compute distance between object and model
         float dist = computeDistance(object_cloud, model_cloud, match.transform);
@@ -313,7 +325,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
             pcl::transformPointCloudWithNormals(*model_diff_cloud, *model_diff_cloud, match.transform.inverse());
 
             //the matched part of the model
-            ro_iter->object_cloud_=matched_model_part;
+            ro_iter->setObjectCloud(matched_model_part);
             ro_iter->state_ =(is_static ? ObjectState::STATIC : ObjectState::DISPLACED);
             ro_iter->match_ = match;
             ro_iter->object_folder_path_="";
@@ -360,7 +372,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
             extract.filter(*matched_object_part);
 
             //the matched part of the object
-            co_iter->object_cloud_=matched_object_part;
+            co_iter->setObjectCloud(matched_object_part);
             co_iter->state_ = (is_static ? ObjectState::STATIC : ObjectState::DISPLACED);
             co_iter->match_ = match;
             co_iter->object_folder_path_="";
@@ -627,12 +639,14 @@ float ObjectMatching::computeDistance(const pcl::PointCloud<PointNormal>::Ptr ob
     std::vector<float> pointSquaredDistance;
 
     float sum_eucl_dist = 0.0f;
+    int nr_overlapping_pts = 0;
     for (size_t i = 0; i < model_transformed->size(); i++) {
         if ( kdtree.radiusSearch (model_transformed->points[i], 0.02, pointIdxSearch, pointSquaredDistance) > 0 ) {
             sum_eucl_dist += pcl::euclideanDistance(model_cloud->points[i], object_cloud->points[pointIdxSearch[0]]);
+            nr_overlapping_pts++;
         }
     }
-    return sum_eucl_dist/model_transformed->size();
+    return sum_eucl_dist/nr_overlapping_pts;
 }
 
 void ObjectMatching::saveCloudResults(pcl::PointCloud<PointNormal>::Ptr object_cloud, pcl::PointCloud<PointNormal>::Ptr model_aligned,

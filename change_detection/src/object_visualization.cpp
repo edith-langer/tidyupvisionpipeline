@@ -2,7 +2,8 @@
 
 ObjectVisualization::ObjectVisualization(pcl::PointCloud<PointNormal>::Ptr ref_cloud, pcl::PointCloud<PointNormal>::Ptr curr_cloud,
                                          std::vector<DetectedObject>  disappeared_objects,  std::vector<DetectedObject> novel_objects,
-                                          std::vector<DetectedObject> displaced_ref_objects,  std::vector<DetectedObject> displaced_curr_objects)
+                                         std::vector<DetectedObject> displaced_ref_objects,  std::vector<DetectedObject> displaced_curr_objects,
+                                         std::vector<DetectedObject> static_ref_objects, std::vector<DetectedObject> static_curr_objects)
 {
     this->ref_cloud = ref_cloud;
     this->disappeared_objects = disappeared_objects;
@@ -10,6 +11,8 @@ ObjectVisualization::ObjectVisualization(pcl::PointCloud<PointNormal>::Ptr ref_c
     this->novel_objects = novel_objects;
     this->displaced_ref_objects = displaced_ref_objects;
     this->displaced_curr_objects = displaced_curr_objects;
+    this->static_ref_objects = static_ref_objects;
+    this->static_curr_objects = static_curr_objects;
 }
 
 void ObjectVisualization::visualize() {
@@ -20,12 +23,14 @@ void ObjectVisualization::visualize() {
     pcl::PointCloud<PointRGBA>::Ptr novel_objects_cloud(new pcl::PointCloud<PointRGBA>);
     pcl::PointCloud<PointRGBA>::Ptr displaced_ref_objects_cloud(new pcl::PointCloud<PointRGBA>);
     pcl::PointCloud<PointRGBA>::Ptr displaced_curr_objects_cloud(new pcl::PointCloud<PointRGBA>);
+    pcl::PointCloud<PointRGBA>::Ptr static_ref_objects_cloud(new pcl::PointCloud<PointRGBA>);
+    pcl::PointCloud<PointRGBA>::Ptr static_curr_objects_cloud(new pcl::PointCloud<PointRGBA>);
 
     //prepare clouds to highlight detected objects
     //Removed objects : RED
     for (DetectedObject o : disappeared_objects) {
         pcl::PointCloud<PointRGBA>::Ptr o_cloud(new pcl::PointCloud<PointRGBA>);
-        pcl::copyPointCloud(*o.object_cloud_, *o_cloud);
+        pcl::copyPointCloud(*o.getObjectCloud(), *o_cloud);
         for (size_t i = 0; i < o_cloud->size(); i++) {
             o_cloud->points[i].r = 255;
             o_cloud->points[i].g = 0;
@@ -38,7 +43,7 @@ void ObjectVisualization::visualize() {
     //New objects: GREEN
     for (DetectedObject o : novel_objects) {
         pcl::PointCloud<PointRGBA>::Ptr o_cloud(new pcl::PointCloud<PointRGBA>);
-        pcl::copyPointCloud(*o.object_cloud_, *o_cloud);
+        pcl::copyPointCloud(*o.getObjectCloud(), *o_cloud);
         for (size_t i = 0; i < o_cloud->size(); i++) {
             o_cloud->points[i].r = 0;
             o_cloud->points[i].g = 255;
@@ -46,6 +51,30 @@ void ObjectVisualization::visualize() {
             o_cloud->points[i].a = 128;
         }
         *novel_objects_cloud += *o_cloud;
+    }
+
+    //static objects: WHITE
+    for (DetectedObject o : static_ref_objects) {
+        pcl::PointCloud<PointRGBA>::Ptr o_cloud(new pcl::PointCloud<PointRGBA>);
+        pcl::copyPointCloud(*o.getObjectCloud(), *o_cloud);
+        for (size_t i = 0; i < o_cloud->size(); i++) {
+            o_cloud->points[i].r = 255;
+            o_cloud->points[i].g = 255;
+            o_cloud->points[i].b = 255;
+            o_cloud->points[i].a = 128;
+        }
+        *static_ref_objects_cloud += *o_cloud;
+    }
+    for (DetectedObject o : static_curr_objects) {
+        pcl::PointCloud<PointRGBA>::Ptr o_cloud(new pcl::PointCloud<PointRGBA>);
+        pcl::copyPointCloud(*o.getObjectCloud(), *o_cloud);
+        for (size_t i = 0; i < o_cloud->size(); i++) {
+            o_cloud->points[i].r = 255;
+            o_cloud->points[i].g = 255;
+            o_cloud->points[i].b = 255;
+            o_cloud->points[i].a = 128;
+        }
+        *static_curr_objects_cloud += *o_cloud;
     }
 
     //we need different color values for the displaced objects
@@ -57,8 +86,8 @@ void ObjectVisualization::visualize() {
         const DetectedObject &curr_object = *curr_obj_iter;
         pcl::PointCloud<PointRGBA>::Ptr ref_objects_cloud(new pcl::PointCloud<PointRGBA>);
         pcl::PointCloud<PointRGBA>::Ptr curr_objects_cloud(new pcl::PointCloud<PointRGBA>);
-        pcl::copyPointCloud(*ref_object.object_cloud_, *ref_objects_cloud);
-        pcl::copyPointCloud(*curr_object.object_cloud_, *curr_objects_cloud);
+        pcl::copyPointCloud(*ref_object.getObjectCloud(), *ref_objects_cloud);
+        pcl::copyPointCloud(*curr_object.getObjectCloud(), *curr_objects_cloud);
         uint r = rand() % 200;
         uint g = rand() % 200;
         uint range = 256 - 100;
@@ -92,11 +121,15 @@ void ObjectVisualization::visualize() {
     viewer->addPointCloud<PointRGBA>(disappeared_objects_cloud, rgba, "disappeared objects", v1);
     rgba.setInputCloud(displaced_ref_objects_cloud);
     viewer->addPointCloud<PointRGBA>(displaced_ref_objects_cloud, rgba, "displaced objects in reference scene", v1);
+    rgba.setInputCloud(static_ref_objects_cloud);
+    viewer->addPointCloud<PointRGBA>(static_ref_objects_cloud, rgba, "static objects in reference scene", v1);
     viewer->addPointCloud<PointNormal>(curr_cloud, "current scene", v2);
     rgba.setInputCloud(novel_objects_cloud);
     viewer->addPointCloud<PointRGBA>(novel_objects_cloud, rgba, "novel objects", v2);
     rgba.setInputCloud(displaced_curr_objects_cloud);
     viewer->addPointCloud<PointRGBA>(displaced_curr_objects_cloud, rgba, "displaced objects in current scene", v2);
+    rgba.setInputCloud(static_curr_objects_cloud);
+    viewer->addPointCloud<PointRGBA>(static_curr_objects_cloud, rgba, "static objects in current scene", v2);
 
     //viewer->resetCameraViewpoint("reference scene");
     //viewer->resetCameraViewpoint("current scene");

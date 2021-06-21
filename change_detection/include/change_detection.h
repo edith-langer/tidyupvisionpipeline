@@ -86,7 +86,7 @@ private:
                                   std::vector<PlaneWithObjInd> &objects, double leaf_size, std::string res_path);
     std::tuple<pcl::PointCloud<PointNormal>::Ptr, std::vector<int> > upsampleObjects(pcl::octree::OctreePointCloudSearch<PointNormal>::Ptr octree, pcl::PointCloud<PointNormal>::Ptr orig_input_cloud,
                                                                                      pcl::PointCloud<PointNormal>::Ptr objects_ds_cloud, std::string output_path, int counter);
-    void objectRegionGrowing(pcl::PointCloud<PointNormal>::Ptr cloud, std::vector<PlaneWithObjInd> &objects, int max_object_size);
+    void objectRegionGrowing(pcl::PointCloud<PointNormal>::Ptr cloud, std::vector<PlaneWithObjInd> &objects, int max_object_size = std::numeric_limits<int>::max());
     pcl::PointCloud<PointNormal>::Ptr fromObjectVecToObjectCloud(const std::vector<PlaneWithObjInd> objects, pcl::PointCloud<PointNormal>::Ptr cloud);
     void saveObjectsWithPlanes(std::string path, const std::vector<PlaneWithObjInd> objects, pcl::PointCloud<PointNormal>::Ptr cloud);
     void mergeObjects(std::vector<PlaneWithObjInd>& objects);

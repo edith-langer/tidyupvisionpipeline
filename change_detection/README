@@ -29,7 +29,7 @@
 	- score = linear weighting of color correspondence and extend of overlap
 
 
---- main
+--- change_detection
 	- downsample input clouds for faster computation of semantic segmentation, object extraction from planes and LV
 	- filter out objects with similar color to their supporting plane and which are planar (helpfull if reconstruction generates 		  double floors)
 	- region growing to  get missed object parts and also to filter out false positives when it becomes too big
@@ -40,3 +40,7 @@ My original change detection method detects objects labeled as object from semen
 
 TODO:
 main.cpp:532 recomputing normals; exchange that with the normal combination used for ppf now
+
+
+only part of the objects is detected when it is not fully placed on the plane. e.g at the table edge
+

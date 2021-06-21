@@ -73,7 +73,7 @@ private:
     std::vector<PlaneStruct> hor_planes_;
 
     PlaneWithObjInd extractObjectInd();
-    void filter_flying_objects(pcl::PointCloud<PointNormal>::Ptr orig_cloud_, pcl::PointIndices::Ptr ind, float avg_plane_z);
+    void filter_flying_objects(pcl::PointCloud<PointNormal>::Ptr orig_cloud_, pcl::PointIndices::Ptr ind, pcl::PointCloud<PointNormal>::Ptr plane);
 };
 
 #endif //PLANE_OBJECT_EXTRACTION_H

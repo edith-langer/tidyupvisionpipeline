@@ -77,10 +77,10 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
     pcl::io::savePCDFileBinary(result_path_ + "/cropped_cloud.pcd", *cropped_cloud);
 
 
-    //we know roughly where the plane is and keep all points within a distance of 5 cm
+    //we know roughly where the plane is and keep all points within a distance of 15 cm
     pcl::SampleConsensusModelPlane<PointNormal>::Ptr dit (new pcl::SampleConsensusModelPlane<PointNormal> (cropped_cloud));
     std::vector<int> main_plane_inliers_vec;
-    dit -> selectWithinDistance (main_plane_coeffs_, 0.05, main_plane_inliers_vec);
+    dit -> selectWithinDistance (main_plane_coeffs_, 0.15, main_plane_inliers_vec);
     pcl::PointIndices::Ptr main_plane_inliers (new pcl::PointIndices ());
     main_plane_inliers->indices = main_plane_inliers_vec;
     pcl::PointCloud<PointNormal>::Ptr rough_plane_cloud (new pcl::PointCloud<PointNormal>);
@@ -203,7 +203,7 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
         return PlaneWithObjInd(); //return empty object
     }
 
-    //set the plane inliers to the filtered outcome; transform from plane_cloud indices to original indices
+    //set the plane inliers to the filtered outcome
     //update z-value
     pcl::PointIndices::Ptr filtered_plane_ind(new pcl::PointIndices);
     float new_z_value =0.0f;
@@ -253,7 +253,7 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
 
         //check if objects are flying
         std::cout << "Object indices size before filtering " << object_indices->indices.size();
-        filter_flying_objects(objects, object_indices, main_plane.avg_z);
+        filter_flying_objects(objects, object_indices, plane_cloud);
         std::cout << " and after filtering: " << object_indices->indices.size() <<std::endl;
 
         if (object_indices->indices.size() > 0) {
@@ -285,7 +285,7 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
 
 
 
-void ExtractObjectsFromPlanes::filter_flying_objects(pcl::PointCloud<PointNormal>::Ptr cloud, pcl::PointIndices::Ptr ind, float avg_plane_z) {
+void ExtractObjectsFromPlanes::filter_flying_objects(pcl::PointCloud<PointNormal>::Ptr cloud, pcl::PointIndices::Ptr ind, pcl::PointCloud<PointNormal>::Ptr plane) {
     // Create EuclideanClusterExtraction and set parameters
     pcl::EuclideanClusterExtraction<PointNormal> ec;
     std::vector<pcl::PointIndices> cluster_indices;
@@ -309,7 +309,26 @@ void ExtractObjectsFromPlanes::filter_flying_objects(pcl::PointCloud<PointNormal
         PointNormal minPt, maxPt;
         pcl::getMinMax3D (*cloud_cluster, minPt, maxPt);
 
-        if (minPt.z - avg_plane_z > 0.05) {
+        //crop plane according to cluster dimensions
+        pcl::PointCloud<PointNormal>::Ptr cropped_plane_cloud(new pcl::PointCloud<PointNormal>);
+        pcl::PassThrough<PointNormal> pass;
+        pass.setInputCloud(plane);
+        pass.setFilterFieldName("x");
+        pass.setFilterLimits(minPt.x - 0.15, maxPt.x + 0.15);
+        pass.setKeepOrganized(false);
+        pass.filter(*cropped_plane_cloud);
+        pass.setInputCloud(cropped_plane_cloud);
+        pass.setFilterFieldName("y");
+        pass.setFilterLimits(minPt.y - 0.15, maxPt.y + 0.15);
+        pass.filter(*cropped_plane_cloud);
+
+        float avg_cropped_plane_z = 0;
+        for (size_t p = 0; p < cropped_plane_cloud->size(); p++) {
+            avg_cropped_plane_z += cropped_plane_cloud->points[p].z;
+        }
+        avg_cropped_plane_z /= cropped_plane_cloud->size();
+
+        if (minPt.z - avg_cropped_plane_z > 0.05) {
             std::cerr << "Cluster is flying. We remove it." << std::endl;
             ind_to_be_removed.insert(std::end(ind_to_be_removed), std::begin(cluster_indices.at(i).indices), std::end(cluster_indices.at(i).indices));
         }

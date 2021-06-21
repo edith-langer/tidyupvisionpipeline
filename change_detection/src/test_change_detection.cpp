@@ -54,6 +54,8 @@ std::map<int, DetectedObject> pot_new_obj;
 std::map<int, DetectedObject> pot_removed_obj;
 std::map<int, DetectedObject> ref_displaced_obj;
 std::map<int, DetectedObject> curr_displaced_obj;
+std::map<int, DetectedObject> curr_static_obj;
+std::map<int, DetectedObject> ref_static_obj;
 
 std::string ppf_model_path;
 std::string result_path;
@@ -136,7 +138,7 @@ void updateModelInput(DetectedObject ro, std::string ppf_model_path, std::string
     }
     boost::filesystem::remove_all(orig_path);
     boost::filesystem::create_directories(orig_path);
-    pcl::io::savePCDFile(orig_path + "/3D_model.pcd", *ro.object_cloud_); //PPF will create a new model with the new cloud
+    pcl::io::savePCDFile(orig_path + "/3D_model.pcd", *ro.getObjectCloud()); //PPF will create a new model with the new cloud
 }
 
 void updateDetectedObjects(std::vector<DetectedObject>& ref_result, std::vector<DetectedObject>& curr_result) {
@@ -151,6 +153,7 @@ void updateDetectedObjects(std::vector<DetectedObject>& ref_result, std::vector<
             ref_displaced_obj[ro.getID()] = ro;
             pot_removed_obj.erase(ro.getID());
         } else if (ro.state_ == ObjectState::STATIC) {
+            ref_static_obj[ro.getID()] = ro;
             pot_removed_obj.erase(ro.getID());
         }
 
@@ -162,6 +165,7 @@ void updateDetectedObjects(std::vector<DetectedObject>& ref_result, std::vector<
             curr_displaced_obj[co.getID()] = co;
             pot_new_obj.erase(co.getID());
         }  else if (co.state_ == ObjectState::STATIC) {
+            curr_static_obj[co.getID()] = co;
             pot_new_obj.erase(co.getID());
         }
     }
@@ -388,6 +392,10 @@ std::map<int, ReconstructedPlane> prepareInputData(std::string data_path) {
                     pass.setFilterLimits(min_hull_pt.y - 0.1, max_hull_pt.y + 0.1);
                     pass.filter(*cropped_source_cloud);
 
+                    //this can happen if the table extractor method does not work perfectly
+                    if (cropped_source_cloud->empty())
+                        continue;
+
                     pcl::io::savePCDFileBinary(plane_nr_path.path().string() + "/cropped_source_cloud.pcd", *cropped_source_cloud);
 
                     //align to table_1.ply
@@ -588,42 +596,94 @@ int main(int argc, char* argv[])
     std::cout << "New objects: " << new_obj << std::endl;
     std::cout << "Displaced objects in reference: " << ref_displaced_obj << std::endl;
     std::cout << "Displaced objects in current: " << curr_displaced_obj << std::endl;
+    std::cout << "Static objects in reference: " << ref_static_obj << std::endl;
+    std::cout << "Static objects in current: " << curr_static_obj << std::endl;
 
+
+    //STORING RESULTS AND VISUALIZE THEM
 
     //create point clouds of detected objects to save results as pcd-files
     pcl::PointCloud<PointNormal>::Ptr ref_removed_objects_cloud(new pcl::PointCloud<PointNormal>);
-    pcl::PointCloud<PointNormal>::Ptr ref_displaced_objects_cloud(new pcl::PointCloud<PointNormal>);
+    pcl::PointCloud<PointLabel>::Ptr ref_displaced_objects_cloud(new pcl::PointCloud<PointLabel>);
+    pcl::PointCloud<PointLabel>::Ptr ref_static_objects_cloud(new pcl::PointCloud<PointLabel>);
     pcl::PointCloud<PointNormal>::Ptr curr_new_objects_cloud(new pcl::PointCloud<PointNormal>);
-    pcl::PointCloud<PointNormal>::Ptr curr_displaced_objects_cloud(new pcl::PointCloud<PointNormal>);
+    pcl::PointCloud<PointLabel>::Ptr curr_displaced_objects_cloud(new pcl::PointCloud<PointLabel>);
+    pcl::PointCloud<PointLabel>::Ptr curr_static_objects_cloud(new pcl::PointCloud<PointLabel>);
+
+    //transform maps to vectors
+    std::vector<DetectedObject> removed_obj_vec, new_obj_vec, ref_dis_obj_vec, curr_dis_obj_vec, ref_static_obj_vec, curr_static_obj_vec;
+    removed_obj_vec = fromMapToValVec(removed_obj);
+    new_obj_vec = fromMapToValVec(new_obj);
+    ref_dis_obj_vec = fromMapToValVec(ref_displaced_obj);
+    curr_dis_obj_vec = fromMapToValVec(curr_displaced_obj);
+    ref_static_obj_vec = fromMapToValVec(ref_static_obj);
+    curr_static_obj_vec = fromMapToValVec(curr_static_obj);
 
     for (auto const & o : removed_obj) {
-        *ref_removed_objects_cloud += *(o.second.object_cloud_);
+        *ref_removed_objects_cloud += *(o.second.getObjectCloud());
     }
     if (!ref_removed_objects_cloud->empty())
         pcl::io::savePCDFile(result_path + "/ref_removed_objects.pcd", *ref_removed_objects_cloud);
 
-    for (auto const & o : ref_displaced_obj) {
-        *ref_displaced_objects_cloud += *(o.second.object_cloud_);
-    }
-    if (!ref_displaced_objects_cloud->empty())
-        pcl::io::savePCDFile(result_path + "/ref_displaced_objects.pcd", *ref_displaced_objects_cloud);
-
     for (auto const & o : new_obj) {
-        *curr_new_objects_cloud += *(o.second.object_cloud_);
+        *curr_new_objects_cloud += *(o.second.getObjectCloud());
     }
     if (!curr_new_objects_cloud->empty())
         pcl::io::savePCDFile(result_path + "/curr_new_objects.pcd", *curr_new_objects_cloud);
 
-    for (auto const & o : curr_displaced_obj) {
-        *curr_displaced_objects_cloud += *(o.second.object_cloud_);
+    //assign labels to the object based on the matches for DISPLACED objects
+    for (size_t o = 0; o < ref_dis_obj_vec.size(); o++) {
+        const DetectedObject &ref_object = ref_dis_obj_vec[o];
+        auto curr_obj_iter = std::find_if( curr_dis_obj_vec.begin(), curr_dis_obj_vec.end(),[ref_object]
+                (DetectedObject const &o) {return o.match_.model_id == ref_object.getID(); });
+        const DetectedObject &curr_object = *curr_obj_iter;
+        pcl::PointCloud<PointLabel>::Ptr ref_objects_cloud(new pcl::PointCloud<PointLabel>);
+        pcl::PointCloud<PointLabel>::Ptr curr_objects_cloud(new pcl::PointCloud<PointLabel>);
+        pcl::copyPointCloud(*ref_object.getObjectCloud(), *ref_objects_cloud);
+        pcl::copyPointCloud(*curr_object.getObjectCloud(), *curr_objects_cloud);
+        for (size_t i = 0; i < ref_objects_cloud->size(); i++) {
+            ref_objects_cloud->points[i].label=ref_object.getID() * 20;
+        }
+        for (size_t i = 0; i < curr_objects_cloud->size(); i++) {
+            curr_objects_cloud->points[i].label = ref_object.getID() * 20;
+        }
+        *ref_displaced_objects_cloud += *ref_objects_cloud;
+        *curr_displaced_objects_cloud += *curr_objects_cloud;
     }
+
+    if (!ref_displaced_objects_cloud->empty())
+        pcl::io::savePCDFile(result_path + "/ref_displaced_objects.pcd", *ref_displaced_objects_cloud);
     if (!curr_displaced_objects_cloud->empty())
         pcl::io::savePCDFile(result_path + "/curr_displaced_objects.pcd", *curr_displaced_objects_cloud);
 
 
-    //visualization
+    //assign labels to the object based on the matches for STATIC objects
+    for (size_t o = 0; o < ref_static_obj_vec.size(); o++) {
+        const DetectedObject &ref_object = ref_static_obj_vec[o];
+        auto curr_obj_iter = std::find_if( curr_static_obj_vec.begin(), curr_static_obj_vec.end(),[ref_object]
+                (DetectedObject const &o) {return o.match_.model_id == ref_object.getID(); });
+        const DetectedObject &curr_object = *curr_obj_iter;
+        pcl::PointCloud<PointLabel>::Ptr ref_objects_cloud(new pcl::PointCloud<PointLabel>);
+        pcl::PointCloud<PointLabel>::Ptr curr_objects_cloud(new pcl::PointCloud<PointLabel>);
+        pcl::copyPointCloud(*ref_object.getObjectCloud(), *ref_objects_cloud);
+        pcl::copyPointCloud(*curr_object.getObjectCloud(), *curr_objects_cloud);
+        for (size_t i = 0; i < ref_objects_cloud->size(); i++) {
+            ref_objects_cloud->points[i].label = ref_object.getID() * 20;
+        }
+        for (size_t i = 0; i < curr_objects_cloud->size(); i++) {
+            curr_objects_cloud->points[i].label = ref_object.getID() * 20;
+        }
+        *ref_static_objects_cloud += *ref_objects_cloud;
+        *curr_static_objects_cloud += *curr_objects_cloud;
+    }
+    if (!ref_static_objects_cloud->empty())
+        pcl::io::savePCDFile(result_path + "/ref_static_objects.pcd", *ref_static_objects_cloud);
+    if (!curr_static_objects_cloud->empty())
+        pcl::io::savePCDFile(result_path + "/curr_static_objects.pcd", *curr_static_objects_cloud);
+
+
+
     //put all planes together in one file as reference
-    //copy the fused cloud and add colored points from detected objects (e.g. removed ones red, new ones green, and displaced ones r and g random and b high number)
     pcl::PointCloud<PointNormal>::Ptr ref_cloud_merged(new pcl::PointCloud<PointNormal>);
     pcl::PointCloud<PointNormal>::Ptr curr_cloud_merged(new pcl::PointCloud<PointNormal>);
 
@@ -678,13 +738,10 @@ int main(int argc, char* argv[])
     pcl::io::savePCDFile(result_path + "/curr_cloud_merged.pcd", *curr_merged_ds);
 
 
-    std::vector<DetectedObject> removed_obj_vec, new_obj_vec, ref_dis_obj_vec, curr_dis_obj_vec;
-    removed_obj_vec = fromMapToValVec(removed_obj);
-    new_obj_vec = fromMapToValVec(new_obj);
-    ref_dis_obj_vec = fromMapToValVec(ref_displaced_obj);
-    curr_dis_obj_vec = fromMapToValVec(curr_displaced_obj);
-
-    ObjectVisualization vis(ref_cloud_merged, curr_cloud_merged, removed_obj_vec, new_obj_vec, ref_dis_obj_vec, curr_dis_obj_vec);
+    //visualization with PCLViewer
+    //copy the fused cloud and add colored points from detected objects (e.g. removed ones red, new ones green, and displaced ones r and g random and b high number)
+    ObjectVisualization vis(ref_cloud_merged, curr_cloud_merged, removed_obj_vec, new_obj_vec,
+                            ref_dis_obj_vec, curr_dis_obj_vec, ref_static_obj_vec, curr_static_obj_vec);
     vis.visualize();
 
 

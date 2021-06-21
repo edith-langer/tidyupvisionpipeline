@@ -17,7 +17,8 @@ class ObjectVisualization
 public:
     ObjectVisualization(pcl::PointCloud<PointNormal>::Ptr ref_cloud, pcl::PointCloud<PointNormal>::Ptr curr_cloud,
                         std::vector<DetectedObject> disappeared_objects, std::vector<DetectedObject> novel_objects,
-                        std::vector<DetectedObject> displaced_ref_objects, std::vector<DetectedObject> displaced_curr_objects);
+                        std::vector<DetectedObject> displaced_ref_objects, std::vector<DetectedObject> displaced_curr_objects,
+                        std::vector<DetectedObject> static_ref_objects, std::vector<DetectedObject> static_curr_objects);
 
     void visualize();
 private:
@@ -27,6 +28,8 @@ private:
     std::vector<DetectedObject> novel_objects;
     std::vector<DetectedObject> displaced_ref_objects;
     std::vector<DetectedObject> displaced_curr_objects;
+    std::vector<DetectedObject> static_ref_objects;
+    std::vector<DetectedObject> static_curr_objects;
 };
 
 #endif // OBJECT_VISUALIZATION_H
