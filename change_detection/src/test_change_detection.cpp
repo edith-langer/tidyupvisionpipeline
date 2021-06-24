@@ -20,6 +20,8 @@
 
 #include "change_detection.h"
 
+bool do_LV_before_matching = true;
+
 typedef pcl::PointXYZRGBNormal PointNormal;
 typedef pcl::PointXYZRGB PointRGB;
 typedef pcl::PointXYZRGBL PointLabel;
@@ -455,7 +457,7 @@ int main(int argc, char* argv[])
 
     //----------------------------setup result folder----------------------------------
     std::string timestamp = getCurrentTime();
-    result_path =  result_path + "/" + timestamp;
+    result_path =  result_path + "/" + timestamp + (do_LV_before_matching ? "_withLV":"" );
     boost::filesystem::create_directories(result_path);
 
     //----------------------------setup ppf model folder-------------------------------

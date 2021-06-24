@@ -10,12 +10,15 @@
 #include <pcl/registration/icp.h>
 #include <pcl/registration/transformation_estimation_lm.h>
 
+#include <PPFRecognizerParameter.h>
+
 #include "plane_object_extraction.h"
 #include "warp_point_rigid_4d.h"
 #include "scene_differencing_points.h"
 #include "color_histogram.h"
+#include "object_matching.h"
 
-typedef pcl::PointXYZRGBNormal PointType;
+typedef pcl::PointXYZRGBNormal PointNormal;
 
 struct LocalObjectVerificationParams {
     float diff_dist =0.02;
@@ -26,34 +29,31 @@ struct LocalObjectVerificationParams {
     float icp_ransac_thr = 0.009;
     float color_weight = 0.25;
     float overlap_weight = 0.75;
-    float min_score_thr = 0.6;
+    float min_score_thr = 0.7;
 };
 
 class LocalObjectVerification
 {
 public:
-    LocalObjectVerification(std::vector<PlaneWithObjInd> potential_objects, pcl::PointCloud<PointType>::Ptr ref_cloud,
-                            pcl::PointCloud<PointType>::Ptr curr_cloud, LocalObjectVerificationParams params);
-    std::vector<PlaneWithObjInd> verify_changed_objects();
+    LocalObjectVerification(pcl::PointCloud<PointNormal>::Ptr ref_object, //pcl::PointCloud<PointNormal>::Ptr ref_plane,
+                            pcl::PointCloud<PointNormal>::Ptr curr_object, //pcl::PointCloud<PointNormal>::Ptr curr_plane,
+                            LocalObjectVerificationParams params);
+    std::tuple<std::vector<int>, std::vector<int> > computeLV();
     void setDebugOutputPath (std::string debug_output_path);
 
-    void setRefCloud(pcl::PointCloud<PointType>::Ptr cloud) {
-        this->ref_cloud = cloud;
+    void setRefCloud(pcl::PointCloud<PointNormal>::Ptr cloud) {
+        this->ref_object_ = cloud;
     }
 
-    void setCurrCloud(pcl::PointCloud<PointType>::Ptr cloud) {
-        this->curr_cloud = cloud;
+    void setCurrCloud(pcl::PointCloud<PointNormal>::Ptr cloud) {
+        this->curr_object_ = cloud;
     }
-
-    void setPotentialObjects(std::vector<PlaneWithObjInd> potential_objects) {
-        this->potential_objects = potential_objects;
-    }
-
 
 private:
-    std::vector<PlaneWithObjInd> potential_objects;
-    pcl::PointCloud<PointType>::Ptr ref_cloud;
-    pcl::PointCloud<PointType>::Ptr curr_cloud;
+    pcl::PointCloud<PointNormal>::Ptr ref_object_;
+    pcl::PointCloud<PointNormal>::Ptr curr_object_;
+    pcl::PointCloud<PointNormal>::Ptr ref_plane_;
+    pcl::PointCloud<PointNormal>::Ptr curr_plane_;
 
     LocalObjectVerificationParams params_;
 

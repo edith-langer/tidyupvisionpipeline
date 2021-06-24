@@ -102,6 +102,10 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
         //choose the models that should be used with the recognizer
         std::vector<std::string> objects_to_look_for;
         for (DetectedObject m : model_vec_) {
+            //if model object was already matched
+            if (m.state_ == ObjectState::STATIC || m.state_ == ObjectState::DISPLACED)
+                continue;
+
             //if we haven't tried to match this object with this model
             if (object_vec_[i].already_checked_model_ids.find(m.getID()) == object_vec_[i].already_checked_model_ids.end())
             {
@@ -673,3 +677,49 @@ void ObjectMatching::saveCloudResults(pcl::PointCloud<PointNormal>::Ptr object_c
 }
 
 
+//returns all valid clusters and indices that were removed are stored in removed_ind
+//the input cloud does not change!
+std::vector<pcl::PointIndices> ObjectMatching::clusterOutliersBySize(const pcl::PointCloud<PointNormal>::Ptr cloud, std::vector<int> filtered_ind, float cluster_thr,
+                                                                           int min_cluster_size, int max_cluster_size) {
+    //clean up small things
+    std::vector<pcl::PointIndices> cluster_indices;
+    if (cloud->empty()) {
+        return cluster_indices;
+    }
+    //check if cloud only consists of nans
+    std::vector<int> nan_ind;
+    pcl::PointCloud<PointNormal>::Ptr no_nans_cloud(new pcl::PointCloud<PointNormal>);
+    cloud->is_dense = false;
+    pcl::removeNaNFromPointCloud(*cloud, *no_nans_cloud, nan_ind);
+    if (no_nans_cloud->size() == 0) {
+        return cluster_indices;
+    }
+    if (no_nans_cloud->size() == cloud->size())
+        cloud->is_dense = true;
+
+
+    pcl::search::KdTree<PointNormal>::Ptr tree (new pcl::search::KdTree<PointNormal>);
+    tree->setInputCloud (cloud);
+
+    pcl::EuclideanClusterExtraction<PointNormal> ec;
+    ec.setClusterTolerance (cluster_thr);
+    ec.setMinClusterSize (min_cluster_size);
+    ec.setMaxClusterSize (max_cluster_size);
+    ec.setSearchMethod(tree);
+    ec.setInputCloud (cloud);
+    ec.extract (cluster_indices);
+
+    //extract the indices that got filtered
+    std::vector<int> cluster_ind;
+    for (size_t i = 0; i < cluster_indices.size(); i++) {
+        cluster_ind.insert(std::end(cluster_ind), std::begin(cluster_indices.at(i).indices), std::end(cluster_indices.at(i).indices));
+    }
+    //find points that are not nan and not in a cluster => filtered points
+    for (size_t i = 0; i < cloud->size(); i++) {
+        if (!pcl::isFinite(cloud->points[i]))
+            continue;
+        if (std::find(cluster_ind.begin(), cluster_ind.end(), i) == cluster_ind.end())
+            filtered_ind.push_back(i);
+    }
+    return cluster_indices;
+}

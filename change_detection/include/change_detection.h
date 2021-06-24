@@ -45,7 +45,7 @@ public:
     void init(pcl::PointCloud<PointNormal>::Ptr ref_cloud, pcl::PointCloud<PointNormal>::Ptr curr_cloud,
               const Eigen::Vector4f &ref_plane_coeffs, const Eigen::Vector4f &curr_plane_coeffs,
               pcl::PointCloud<pcl::PointXYZ>::Ptr ref_convex_hull_pts, pcl::PointCloud<pcl::PointXYZ>::Ptr curr_convex_hull_pts,
-              std::string ppf_model_path, std::string output_path = "");
+              std::string ppf_model_path, std::string output_path, bool perform_LV_matching = true);
 
     void setOutputPath (std::string output_path) {
         output_path_ = output_path;
@@ -77,11 +77,10 @@ private:
     pcl::PointCloud<pcl::PointXYZ>::Ptr curr_convex_hull_pts_;
     pcl::PointCloud<pcl::PointXYZ>::Ptr ref_convex_hull_pts_;
 
-    bool do_LV_before_matching = false;
+    bool do_LV_before_matching_;
 
 
     void refineNormals(pcl::PointCloud<PointNormal>::Ptr object_cloud);
-    std::vector<pcl::PointIndices> removeClusteroutliersBySize(pcl::PointCloud<PointNormal>::Ptr cloud, float cluster_thr, int min_cluster_size=15, int max_cluster_size=std::numeric_limits<int>::max());
     void upsampleObjectsAndPlanes(pcl::PointCloud<PointNormal>::Ptr orig_cloud, pcl::PointCloud<PointNormal>::Ptr ds_cloud,
                                   std::vector<PlaneWithObjInd> &objects, double leaf_size, std::string res_path);
     std::tuple<pcl::PointCloud<PointNormal>::Ptr, std::vector<int> > upsampleObjects(pcl::octree::OctreePointCloudSearch<PointNormal>::Ptr octree, pcl::PointCloud<PointNormal>::Ptr orig_input_cloud,
