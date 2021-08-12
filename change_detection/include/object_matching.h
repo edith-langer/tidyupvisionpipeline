@@ -48,6 +48,8 @@ typedef pcl::PointXYZRGB PointRGB;
 typedef pcl::PointXYZRGBNormal PointNormal;
 typedef pcl::PointXYZRGBL PointLabel;
 
+static const float point_dist_diff = 0.01f;
+
 //boost graph defs
 struct VertexProperty {
     std::string name;
@@ -83,7 +85,7 @@ public:
     static std::tuple<float, float> computeModelFitness(pcl::PointCloud<PointNormal>::Ptr object, pcl::PointCloud<PointNormal>::Ptr model,
                                                  v4r::apps::PPFRecognizerParameter param);
     static float computeDistance(const pcl::PointCloud<PointNormal>::Ptr object_cloud, const pcl::PointCloud<PointNormal>::Ptr model_cloud, const Eigen::Matrix4f transform);
-    static std::vector<pcl::PointIndices> clusterOutliersBySize(const pcl::PointCloud<PointNormal>::Ptr cloud, std::vector<int> removed_ind, float cluster_thr,
+    static std::vector<pcl::PointIndices> clusterOutliersBySize(const pcl::PointCloud<PointNormal>::Ptr cloud, std::vector<int> &removed_ind, float cluster_thr,
                                                                       int min_cluster_size=15, int max_cluster_size=std::numeric_limits<int>::max());
 
 
