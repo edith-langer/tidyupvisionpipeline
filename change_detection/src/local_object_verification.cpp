@@ -18,13 +18,13 @@ void LocalObjectVerification::setDebugOutputPath (std::string debug_output_path)
     this->debug_output_path = debug_output_path;
 }
 
-std::tuple<std::vector<int>, std::vector<int>>  LocalObjectVerification::computeLV() {
+std::tuple<std::vector<int>, std::vector<int>, bool>  LocalObjectVerification::computeLV() {
     std::cout << "Perform Local Verification" << std::endl;
-    std::tuple<std::vector<int>, std::vector<int>>  result_tuple;
+    std::tuple<std::vector<int>, std::vector<int>, bool>  result_tuple;
 
 
     std::cout << "Ref cluster has " << ref_object_->size() << " points." << std::endl;
-    pcl::io::savePCDFileBinary(debug_output_path + "/ref_cluster.pcd", *ref_object_);
+    pcl::io::savePCDFileBinary(debug_output_path + "/ref_object.pcd", *ref_object_);
 
     std::cout << "Curr cluster has " << curr_object_->size() << " points." << std::endl;
     pcl::io::savePCDFileBinary(debug_output_path + "/curr_object.pcd", *curr_object_);
@@ -81,6 +81,9 @@ std::tuple<std::vector<int>, std::vector<int>>  LocalObjectVerification::compute
     pcl::removeNaNFromPointCloud(*ref_object_, *ref_object_noNans, ref_nan);
     pcl::removeNaNFromPointCloud(*curr_object_, *curr_object_noNans, curr_nan);
 
+    std::cout << "Ref cluster has " << ref_object_noNans->size() << " points." << std::endl;
+    std::cout << "Curr cluster has " << curr_object_noNans->size() << " points." << std::endl;
+
     //TODO: does a two-step alignment process similar to IROS2020 makes sense?
     //the reconstructions are quite small and should be good enough for alignment
 
@@ -102,6 +105,11 @@ std::tuple<std::vector<int>, std::vector<int>>  LocalObjectVerification::compute
         v4r::apps::PPFRecognizerParameter params;
         std::tuple<float,float> obj_model_conf = ObjectMatching::computeModelFitness(curr_object_registered, ref_object_noNans, params);
         float confidence = std::max(std::get<0>(obj_model_conf), std::get<1>(obj_model_conf));
+        pcl::io::savePCDFileBinary(debug_output_path + "/curr_object_aligned.pcd", *curr_object_registered);
+        std::stringstream stream;
+        stream << std::fixed << std::setprecision(2) << confidence;
+        std::string conf_str = stream.str();
+        pcl::io::savePCDFileBinary(debug_output_path + "/ref_object_conf_" +conf_str + ".pcd", *ref_object_noNans);
 
         if (confidence > params_.min_score_thr) {
             //remove points from MODEL object input cloud
@@ -109,6 +117,13 @@ std::tuple<std::vector<int>, std::vector<int>>  LocalObjectVerification::compute
             std::vector<int> diff_ind;
             std::vector<int> corresponding_ind;
             SceneDifferencingPoints::Cloud::Ptr ref_diff_cloud = scene_diff.computeDifference(ref_object_noNans, curr_object_registered, diff_ind, corresponding_ind);
+
+            //remove very small clusters from the diff
+            std::vector<int> small_cluster_ind;
+            ObjectMatching::clusterOutliersBySize(ref_diff_cloud, small_cluster_ind, 0.014, 30);
+            for (int i = small_cluster_ind.size() - 1; i >= 0; i--) { //small cluster ind is sorted ascending
+                diff_ind.erase(diff_ind.begin() + small_cluster_ind[i]);
+            }
 
             if (diff_ind.size() < 100) { //if less than 100 points left, we do not split the ref object
                 std::get<0>(result_tuple) = std::vector<int>{};
@@ -126,7 +141,10 @@ std::tuple<std::vector<int>, std::vector<int>>  LocalObjectVerification::compute
                 extract.setNegative (true);
                 extract.filter(*matched_ref_part);
 
-                //tranform back to orig ind
+                pcl::io::savePCDFileBinary(debug_output_path + "/ref_object_partial_match.pcd", *matched_ref_part);
+                pcl::io::savePCDFileBinary(debug_output_path + "/ref_object_diff.pcd", *ref_diff_cloud);
+
+                //tranform non matchting points back to orig ind
                 std::vector<int> ref_orig_ind;
                 for (size_t i = 0; i < diff_ind.size(); i++)
                     ref_orig_ind.push_back(ref_nan[diff_ind[i]]);
@@ -136,10 +154,17 @@ std::tuple<std::vector<int>, std::vector<int>>  LocalObjectVerification::compute
             diff_ind.clear(); corresponding_ind.clear();
             SceneDifferencingPoints::Cloud::Ptr curr_diff_cloud = scene_diff.computeDifference(curr_object_registered, ref_object_noNans, diff_ind, corresponding_ind);
 
+            //remove very small clusters from the diff
+            small_cluster_ind.clear();
+            ObjectMatching::clusterOutliersBySize(curr_diff_cloud, small_cluster_ind, 0.014, 30);
+
+            for (int i = small_cluster_ind.size() - 1; i >= 0; i--) {
+                diff_ind.erase(diff_ind.begin() + small_cluster_ind[i]);
+            }
             if (diff_ind.size() < 100) { //if less than 100 points left, we do not split the ref object
                 std::get<1>(result_tuple) = std::vector<int>{};
             }
-            //split the ref object cloud
+            //split the curr object cloud
             else {
                 //the part that is matched
                 pcl::PointCloud<PointNormal>::Ptr matched_curr_part(new pcl::PointCloud<PointNormal>);
@@ -155,26 +180,32 @@ std::tuple<std::vector<int>, std::vector<int>>  LocalObjectVerification::compute
                 pcl::transformPointCloudWithNormals(*matched_curr_part, *matched_curr_part, icp.getFinalTransformation().inverse());
                 pcl::transformPointCloudWithNormals(*curr_diff_cloud, *curr_diff_cloud, icp.getFinalTransformation().inverse());
 
-                //tranform back to orig ind
+                pcl::io::savePCDFileBinary(debug_output_path + "/curr_object_partial_match.pcd", *matched_curr_part);
+                pcl::io::savePCDFileBinary(debug_output_path + "/curr_object_diff.pcd", *curr_diff_cloud);
+
+                //transform non matching points back to orig ind
                 std::vector<int> curr_orig_ind;
                 for (size_t i = 0; i < diff_ind.size(); i++)
                     curr_orig_ind.push_back(curr_nan[diff_ind[i]]);
                 std::get<1>(result_tuple) = curr_orig_ind;
             }
         }
-    // no correspondence found
+        std::get<2>(result_tuple) = true;
+        // no correspondence found
     } else {
-        //return original point cloud
+        //tranform back to orig ind
         std::vector<int> ref_orig_ind;
-        for (size_t i = 0; i < ref_object_->size(); i++)
-            ref_orig_ind.push_back(i);
+        for (size_t i = 0; i < ref_nan.size(); i++)
+            ref_orig_ind.push_back(ref_nan[i]);
         std::get<0>(result_tuple) = ref_orig_ind;
 
         //tranform back to orig ind
         std::vector<int> curr_orig_ind;
-        for (size_t i = 0; i < curr_object_->size(); i++)
-            curr_orig_ind.push_back(i);
+        for (size_t i = 0; i < curr_nan.size(); i++)
+            curr_orig_ind.push_back(curr_nan[i]);
         std::get<1>(result_tuple) = curr_orig_ind;
+
+        std::get<2>(result_tuple) = false;
     }
 
     return result_tuple;

@@ -38,7 +38,7 @@ public:
     LocalObjectVerification(pcl::PointCloud<PointNormal>::Ptr ref_object, //pcl::PointCloud<PointNormal>::Ptr ref_plane,
                             pcl::PointCloud<PointNormal>::Ptr curr_object, //pcl::PointCloud<PointNormal>::Ptr curr_plane,
                             LocalObjectVerificationParams params);
-    std::tuple<std::vector<int>, std::vector<int> > computeLV();
+    std::tuple<std::vector<int>, std::vector<int>, bool > computeLV();
     void setDebugOutputPath (std::string debug_output_path);
 
     void setRefCloud(pcl::PointCloud<PointNormal>::Ptr cloud) {
