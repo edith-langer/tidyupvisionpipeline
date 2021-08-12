@@ -56,17 +56,22 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
     pcl::PointXYZ max_hull_pt, min_hull_pt;
     pcl::getMinMax3D(*convex_hull_pts_, min_hull_pt, max_hull_pt);
 
-    //add some alignment because hull points were computed from a full room reconstruction that may include drift
+    //add some margin because hull points were computed from a full room reconstruction that may include drift
+    float margin = 0.2;
     pcl::PointCloud<PointNormal>::Ptr cropped_cloud(new pcl::PointCloud<PointNormal>);
     pcl::PassThrough<PointNormal> pass;
     pass.setInputCloud(orig_cloud_);
     pass.setFilterFieldName("x");
-    pass.setFilterLimits(min_hull_pt.x - 0.15, max_hull_pt.x + 0.15);
+    pass.setFilterLimits(min_hull_pt.x - margin, max_hull_pt.x + margin);
     pass.setKeepOrganized(true);
     pass.filter(*cropped_cloud);
     pass.setInputCloud(cropped_cloud);
     pass.setFilterFieldName("y");
-    pass.setFilterLimits(min_hull_pt.y - 0.15, max_hull_pt.y + 0.15);
+    pass.setFilterLimits(min_hull_pt.y - margin, max_hull_pt.y + margin);
+    pass.setKeepOrganized(true);
+    pass.filter(*cropped_cloud);
+    pass.setFilterFieldName("z");
+    pass.setFilterLimits(min_hull_pt.z - margin, max_hull_pt.z + margin);
     pass.setKeepOrganized(true);
     pass.filter(*cropped_cloud);
 
@@ -75,6 +80,29 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
     }
 
     pcl::io::savePCDFileBinary(result_path_ + "/cropped_cloud.pcd", *cropped_cloud);
+
+    //cluster the cropped cloud and keep only the biggest cluster
+    pcl::EuclideanClusterExtraction<PointNormal> ec_cropped_cloud;
+    std::vector<pcl::PointIndices> clusters_cropped_cloud;
+    ec_cropped_cloud.setClusterTolerance (0.05);
+    ec_cropped_cloud.setMinClusterSize (5);
+    ec_cropped_cloud.setMaxClusterSize (std::numeric_limits<int>::max());
+    ec_cropped_cloud.setInputCloud (cropped_cloud);
+    ec_cropped_cloud.extract (clusters_cropped_cloud);
+
+    if (clusters_cropped_cloud.size() == 0) {
+        std::cerr << "Not enough points left after cropping the input plane cloud " << std::endl;
+        return PlaneWithObjInd(); //return empty object
+    }
+
+    pcl::ExtractIndices<PointNormal> extract_biggest_cluster;
+    extract_biggest_cluster.setInputCloud (cropped_cloud);
+    extract_biggest_cluster.setIndices (boost::make_shared<pcl::PointIndices>(clusters_cropped_cloud[0])); //the cluster result should be sorted, first element is the biggest
+    extract_biggest_cluster.setNegative (false);
+    extract_biggest_cluster.setKeepOrganized(true);
+    extract_biggest_cluster.filter(*cropped_cloud);
+
+    pcl::io::savePCDFileBinary(result_path_ + "/biggest_cluster.pcd", *cropped_cloud);
 
 
     //we know roughly where the plane is and keep all points within a distance of 15 cm

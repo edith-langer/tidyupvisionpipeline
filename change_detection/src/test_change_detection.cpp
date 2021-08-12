@@ -113,7 +113,16 @@ bool readInput(std::string input_path, const pcl::PointCloud<PointNormal>::Ptr &
     }
 }
 
-void updateModelInput(DetectedObject ro, std::string ppf_model_path, std::string result_path) {
+void createNewModelFolder(DetectedObject &ro, std::string ppf_model_path, std::string result_path) {
+    std::string orig_path = ppf_model_path + "/" + std::to_string(ro.getID());
+    ro.object_folder_path_ = orig_path;
+
+    boost::filesystem::create_directories(orig_path);
+    pcl::io::savePCDFile(orig_path + "/3D_model.pcd", *ro.getObjectCloud()); //PPF will create a new model with the new cloud
+}
+
+
+void removeModelFolder(DetectedObject ro, std::string ppf_model_path, std::string result_path) {
     //there should already exist a folder
     std::string orig_path = ppf_model_path + "/" + std::to_string(ro.getID());
     if (boost::filesystem::exists(orig_path)) {
@@ -139,22 +148,28 @@ void updateModelInput(DetectedObject ro, std::string ppf_model_path, std::string
         }
     }
     boost::filesystem::remove_all(orig_path);
-    boost::filesystem::create_directories(orig_path);
-    pcl::io::savePCDFile(orig_path + "/3D_model.pcd", *ro.getObjectCloud()); //PPF will create a new model with the new cloud
 }
 
 void updateDetectedObjects(std::vector<DetectedObject>& ref_result, std::vector<DetectedObject>& curr_result) {
     for (DetectedObject ro : ref_result) {
         if (ro.state_ == ObjectState::REMOVED) {
-            pot_removed_obj[ro.getID()] = ro;
-            //means that there was a partial match and a new ppf-model is needed
+            //means that there was a partial match and have to create a new model folder
             if (ro.object_folder_path_ == "") {
-                updateModelInput(ro, ppf_model_path, result_path);
+                createNewModelFolder(ro, ppf_model_path, result_path);
             }
+            pot_removed_obj[ro.getID()] = ro;
         } else if (ro.state_ == ObjectState::DISPLACED) {
+            //means that there was a partial match and we do not need the model anymore
+            if (ro.object_folder_path_ == "") {
+                removeModelFolder(ro, ppf_model_path, result_path);
+            }
             ref_displaced_obj[ro.getID()] = ro;
             pot_removed_obj.erase(ro.getID());
         } else if (ro.state_ == ObjectState::STATIC) {
+            //means that there was a partial match and we do not need the model anymore
+            if (ro.object_folder_path_ == "") {
+                removeModelFolder(ro, ppf_model_path, result_path);
+            }
             ref_static_obj[ro.getID()] = ro;
             pot_removed_obj.erase(ro.getID());
         }
@@ -231,7 +246,8 @@ std::map<int, std::map<int, Matrix4f_NotAligned>> transformationParser(std::stri
             mat(3,2) = std::stof(transf_split_result[2]);
             mat(3,3) = std::stof(transf_split_result[3]);
 
-            transformation_map[table_nr].insert(std::make_pair(occurrance, mat.inverse())); //from camera frame to map frame
+            //transformation_map[table_nr].insert(std::make_pair(occurrance, mat.inverse())); //from camera frame to map frame
+            transformation_map[table_nr].insert(std::make_pair(occurrance, Eigen::Matrix4f::Identity()));
         }
     }
     return transformation_map;
@@ -331,13 +347,13 @@ std::map<int, ReconstructedPlane> prepareInputData(std::string data_path) {
 
     //iterate through all plane folders and extract the reconstructed ply-files
     //we assume that the the ply-files are numbered continuously
-    const std::regex ply_filter( "table_[0-9]+.ply" );
-    for(auto & plane_nr_path : boost::filesystem::directory_iterator(data_path + "/planes"))
-    {
-        if (boost::filesystem::is_directory(plane_nr_path.status()))
-        {
+    const std::regex ply_filter( "table_[0-9]+_fusedPoses_i100.ply" );
+    int plane_nr = 0;
+    bool found_plane_folder = true;
+    while (found_plane_folder) {
+        std::string plane_nr_path = data_path + "/planes/" + std::to_string(plane_nr);
+        if (boost::filesystem::exists(plane_nr_path) && boost::filesystem::is_directory(plane_nr_path)) {
             int count = 0;
-            int plane_nr = std::stoi(plane_nr_path.path().filename().string());
             for(auto & occ_nr_path : boost::filesystem::directory_iterator(plane_nr_path))
             {
                 if (!boost::filesystem::is_directory(occ_nr_path.status()))
@@ -349,12 +365,15 @@ std::map<int, ReconstructedPlane> prepareInputData(std::string data_path) {
 
             pcl::PointCloud<PointNormal>::Ptr plane_cloud(new pcl::PointCloud<PointNormal>);
             if (count == 1) {
-                readInput(plane_nr_path.path().string() + "/table_0.ply", plane_cloud);
+                readInput(plane_nr_path + "/table_0_fusedPoses_i100.ply", plane_cloud);
                 //transform the ply
                 Matrix4f_NotAligned & mat = transformations[plane_nr][0];
                 pcl::transformPointCloudWithNormals(*plane_cloud, *plane_cloud, mat);
+                pcl::io::savePCDFileBinary(plane_nr_path + "/merged_plane_clouds.pcd", *plane_cloud);
+                ReconstructedPlane c_hull = center_and_convexHull.at(plane_nr);
+                pcl::io::savePCDFileBinary(plane_nr_path + "/convex_hull.pcd", *c_hull.convex_hull_cloud);
             } else if (count > 1){ //merge the plys
-                readInput(plane_nr_path.path().string() + "/table_0.ply", plane_cloud);
+                readInput(plane_nr_path + "/table_0_fusedPoses_i100.ply", plane_cloud);
 
                 //transform the cloud because hull points are in map frame and not camera frame
                 Matrix4f_NotAligned & mat = transformations[plane_nr][0];
@@ -375,11 +394,13 @@ std::map<int, ReconstructedPlane> prepareInputData(std::string data_path) {
                 pass.setFilterFieldName("y");
                 pass.setFilterLimits(min_hull_pt.y - 0.1, max_hull_pt.y + 0.1);
                 pass.filter(*cropped_target_cloud);
-                pcl::io::savePCDFileBinary(plane_nr_path.path().string() + "/cropped_target_cloud.pcd", *cropped_target_cloud);
+                if (!cropped_target_cloud->empty())
+                    pcl::io::savePCDFileBinary(plane_nr_path + "/cropped_target_cloud.pcd", *cropped_target_cloud);
                 for (size_t i = 1; i < count; i++ ) {
+                    std::cout << "Plane " << plane_nr << "; table " << i << std::endl;
                     pcl::PointCloud<PointNormal>::Ptr source_cloud(new pcl::PointCloud<PointNormal>);
                     pcl::PointCloud<PointNormal>::Ptr cropped_source_cloud(new pcl::PointCloud<PointNormal>);
-                    readInput(plane_nr_path.path().string() + "/table_"+ std::to_string(i) +".ply", source_cloud);
+                    readInput(plane_nr_path + "/table_"+ std::to_string(i) +"/_fusedPoses_i100.ply", source_cloud);
 
                     //transform the cloud because hull points are in map frame and not camera frame
                     Matrix4f_NotAligned & mat = transformations[plane_nr][i];
@@ -398,7 +419,10 @@ std::map<int, ReconstructedPlane> prepareInputData(std::string data_path) {
                     if (cropped_source_cloud->empty())
                         continue;
 
-                    pcl::io::savePCDFileBinary(plane_nr_path.path().string() + "/cropped_source_cloud.pcd", *cropped_source_cloud);
+                    pcl::io::savePCDFileBinary(plane_nr_path + "/cropped_source_cloud.pcd", *cropped_source_cloud);
+
+                    if (cropped_target_cloud->empty())
+                        cropped_target_cloud = cropped_source_cloud;
 
                     //align to table_1.ply
                     pcl::PointCloud<PointNormal>::Ptr plane_registered(new pcl::PointCloud<PointNormal>());
@@ -412,17 +436,24 @@ std::map<int, ReconstructedPlane> prepareInputData(std::string data_path) {
                     icp.setTransformationRotationEpsilon(1 - 1e-15); //epsilon is the cos(angle)
                     icp.align(*plane_registered);
                     std::cout << "has converged:" << icp.hasConverged() << " score: " << icp.getFitnessScore() << std::endl;
+                    //if (icp.hasConverged())
                     *cropped_target_cloud += *plane_registered;
                 }
-                pcl::io::savePCDFileBinary(plane_nr_path.path().string() + "/merged_plane_clouds.pcd", *plane_cloud);
+                plane_cloud = cropped_target_cloud;
+                if (!plane_cloud->empty())
+                    pcl::io::savePCDFileBinary(plane_nr_path + "/merged_plane_clouds.pcd", *plane_cloud);
             }
             //save in vector of planeStructs
             ReconstructedPlane rec_plane;
             rec_plane.cloud = plane_cloud;
             rec_plane.is_checked = false;
             rec_planes[plane_nr] = rec_plane;
+            plane_nr++;
+        } else {
+            found_plane_folder = false;
         }
     }
+
 
     //merge center point and convex hull points with loaded point cloud
     for (std::map<int, ReconstructedPlane>::iterator it = center_and_convexHull.begin(); it != center_and_convexHull.end(); it++) {
@@ -482,13 +513,20 @@ int main(int argc, char* argv[])
         pcl::io::savePCDFile(current_path + "/convex_hull_" + std::to_string(curr_it->first) + ".pcd", *(curr_it->second.convex_hull_cloud));
     }
 
-
     //iterate through all reference planes
     for (std::map<int, ReconstructedPlane>::iterator ref_it = ref_rec_planes.begin(); ref_it != ref_rec_planes.end(); ref_it++ ) {
+        if (ref_it->second.cloud->empty()) {
+            ref_it->second.is_checked=true;
+            continue;
+        }
         // find the closest plane in the current scene
         std::pair<int, ReconstructedPlane> closest_curr_element;
         float min_dist = std::numeric_limits<float>::max();
         for (std::map<int, ReconstructedPlane>::iterator curr_it = curr_rec_planes.begin(); curr_it != curr_rec_planes.end(); curr_it++ ) {
+            if (curr_it->second.cloud->empty()) {
+                curr_it->second.is_checked=true;
+                continue;
+            }
             float dist = Point3D::squaredEuclideanDistance(ref_it->second.center_point, curr_it->second.center_point);
             if (dist < min_dist) {
                 min_dist = dist;
@@ -500,6 +538,7 @@ int main(int argc, char* argv[])
             ref_it->second.is_checked=true;
             curr_rec_planes[closest_curr_element.first].is_checked = true;
 
+            std::cout << "-------------------------- " << ref_it->first << "-" << closest_curr_element.first << " --------------------------" << std::endl;
             std::string plane_comparison_path = result_path + "/" + std::to_string(ref_it->first) + "_" + std::to_string(closest_curr_element.first);
             boost::filesystem::create_directories(plane_comparison_path);
 
@@ -637,7 +676,7 @@ int main(int argc, char* argv[])
     for (size_t o = 0; o < ref_dis_obj_vec.size(); o++) {
         const DetectedObject &ref_object = ref_dis_obj_vec[o];
         auto curr_obj_iter = std::find_if( curr_dis_obj_vec.begin(), curr_dis_obj_vec.end(),[ref_object]
-                (DetectedObject const &o) {return o.match_.model_id == ref_object.getID(); });
+                                           (DetectedObject const &o) {return o.match_.model_id == ref_object.getID(); });
         const DetectedObject &curr_object = *curr_obj_iter;
         pcl::PointCloud<PointLabel>::Ptr ref_objects_cloud(new pcl::PointCloud<PointLabel>);
         pcl::PointCloud<PointLabel>::Ptr curr_objects_cloud(new pcl::PointCloud<PointLabel>);
@@ -663,7 +702,7 @@ int main(int argc, char* argv[])
     for (size_t o = 0; o < ref_static_obj_vec.size(); o++) {
         const DetectedObject &ref_object = ref_static_obj_vec[o];
         auto curr_obj_iter = std::find_if( curr_static_obj_vec.begin(), curr_static_obj_vec.end(),[ref_object]
-                (DetectedObject const &o) {return o.match_.model_id == ref_object.getID(); });
+                                           (DetectedObject const &o) {return o.match_.model_id == ref_object.getID(); });
         const DetectedObject &curr_object = *curr_obj_iter;
         pcl::PointCloud<PointLabel>::Ptr ref_objects_cloud(new pcl::PointCloud<PointLabel>);
         pcl::PointCloud<PointLabel>::Ptr curr_objects_cloud(new pcl::PointCloud<PointLabel>);
