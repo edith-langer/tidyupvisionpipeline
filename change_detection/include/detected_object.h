@@ -16,6 +16,16 @@ const float max_dist_for_being_static = 0.1; //how much can the object be displa
 
 enum ObjectState {NEW, REMOVED, DISPLACED, STATIC, UNKNOWN};
 
+struct FitnessScoreStruct {
+    FitnessScoreStruct() { object_conf = 0.0f; model_conf = 0.0f;}
+    FitnessScoreStruct(float o_c, float m_c, Eigen::Array<bool, Eigen::Dynamic, 1> o_pts, Eigen::Array<bool, Eigen::Dynamic, 1> m_pts ) :
+        object_conf{o_c}, model_conf{m_c}, object_overlapping_pts{o_pts}, model_overlapping_pts{m_pts} {}
+    float object_conf;
+    float model_conf;
+    Eigen::Array<bool, Eigen::Dynamic, 1> object_overlapping_pts;
+    Eigen::Array<bool, Eigen::Dynamic, 1> model_overlapping_pts;
+};
+
 struct Match {
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
@@ -23,9 +33,12 @@ struct Match {
     int model_id;
     int object_id;
     float confidence;
+    FitnessScoreStruct fitness_score;
 
     Match() {model_id = -1; object_id = -1, confidence = -1; transform = Eigen::Matrix4f::Identity();}
-    Match(int m_id, int o_id, float conf, Eigen::Matrix4f t) {model_id = m_id; object_id = o_id; confidence = conf; transform = Eigen::Matrix4f(t);}
+    Match(int m_id, int o_id, float conf, Eigen::Matrix4f t, FitnessScoreStruct f=FitnessScoreStruct()) {
+        model_id = m_id; object_id = o_id; confidence = conf; transform = Eigen::Matrix4f(t); fitness_score = f;
+    }
 };
 
 struct DetectedObject {

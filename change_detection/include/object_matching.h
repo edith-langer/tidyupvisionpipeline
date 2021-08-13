@@ -75,6 +75,7 @@ struct ObjectHypothesesStruct {
     std::vector<v4r::ObjectHypothesesGroup> hypotheses; //return value of the recognize-method: each element contains the hypothesis for a model
 };
 
+
 class ObjectMatching
 {
 public:
@@ -82,11 +83,11 @@ public:
                    std::string model_path, std::string cfg_path);
 
     std::vector<Match> compute(std::vector<DetectedObject> &ref_result, std::vector<DetectedObject> &curr_result);
-    static std::tuple<float, float> computeModelFitness(pcl::PointCloud<PointNormal>::Ptr object, pcl::PointCloud<PointNormal>::Ptr model,
-                                                 v4r::apps::PPFRecognizerParameter param);
+    static FitnessScoreStruct computeModelFitness(pcl::PointCloud<PointNormal>::Ptr object, pcl::PointCloud<PointNormal>::Ptr model,
+                                                        v4r::apps::PPFRecognizerParameter param);
     static float computeDistance(const pcl::PointCloud<PointNormal>::Ptr object_cloud, const pcl::PointCloud<PointNormal>::Ptr model_cloud, const Eigen::Matrix4f transform);
     static std::vector<pcl::PointIndices> clusterOutliersBySize(const pcl::PointCloud<PointNormal>::Ptr cloud, std::vector<int> &removed_ind, float cluster_thr,
-                                                                      int min_cluster_size=15, int max_cluster_size=std::numeric_limits<int>::max());
+                                                                int min_cluster_size=15, int max_cluster_size=std::numeric_limits<int>::max());
 
 
 private:

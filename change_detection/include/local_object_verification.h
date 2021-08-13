@@ -32,13 +32,20 @@ struct LocalObjectVerificationParams {
     float min_score_thr = 0.7;
 };
 
+struct LVResult {
+    std::vector<int> obj_non_matching_pts;
+    std::vector<int> model_non_matching_pts;
+    bool found_alignment;
+    FitnessScoreStruct fitness_score;
+};
+
 class LocalObjectVerification
 {
 public:
     LocalObjectVerification(pcl::PointCloud<PointNormal>::Ptr ref_object, //pcl::PointCloud<PointNormal>::Ptr ref_plane,
                             pcl::PointCloud<PointNormal>::Ptr curr_object, //pcl::PointCloud<PointNormal>::Ptr curr_plane,
                             LocalObjectVerificationParams params);
-    std::tuple<std::vector<int>, std::vector<int>, bool > computeLV();
+    LVResult computeLV();
     void setDebugOutputPath (std::string debug_output_path);
 
     void setRefCloud(pcl::PointCloud<PointNormal>::Ptr cloud) {

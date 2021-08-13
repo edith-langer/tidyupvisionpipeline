@@ -18,9 +18,9 @@ void LocalObjectVerification::setDebugOutputPath (std::string debug_output_path)
     this->debug_output_path = debug_output_path;
 }
 
-std::tuple<std::vector<int>, std::vector<int>, bool>  LocalObjectVerification::computeLV() {
+LVResult LocalObjectVerification::computeLV() {
+    LVResult result;
     std::cout << "Perform Local Verification" << std::endl;
-    std::tuple<std::vector<int>, std::vector<int>, bool>  result_tuple;
 
 
     std::cout << "Ref cluster has " << ref_object_->size() << " points." << std::endl;
@@ -103,8 +103,9 @@ std::tuple<std::vector<int>, std::vector<int>, bool>  LocalObjectVerification::c
 
     if (icp.hasConverged() && icp.getFitnessScore()) {
         v4r::apps::PPFRecognizerParameter params;
-        std::tuple<float,float> obj_model_conf = ObjectMatching::computeModelFitness(curr_object_registered, ref_object_noNans, params);
-        float confidence = std::max(std::get<0>(obj_model_conf), std::get<1>(obj_model_conf));
+        FitnessScoreStruct fitness_score  = ObjectMatching::computeModelFitness(curr_object_registered, ref_object_noNans, params);
+        result.fitness_score = fitness_score;
+        float confidence = std::max(fitness_score.object_conf, fitness_score.model_conf);
         pcl::io::savePCDFileBinary(debug_output_path + "/curr_object_aligned.pcd", *curr_object_registered);
         std::stringstream stream;
         stream << std::fixed << std::setprecision(2) << confidence;
@@ -126,7 +127,7 @@ std::tuple<std::vector<int>, std::vector<int>, bool>  LocalObjectVerification::c
             }
 
             if (diff_ind.size() < 100) { //if less than 100 points left, we do not split the ref object
-                std::get<0>(result_tuple) = std::vector<int>{};
+                result.model_non_matching_pts = std::vector<int>{};
             }
             //split the ref object cloud
             else {
@@ -148,7 +149,7 @@ std::tuple<std::vector<int>, std::vector<int>, bool>  LocalObjectVerification::c
                 std::vector<int> ref_orig_ind;
                 for (size_t i = 0; i < diff_ind.size(); i++)
                     ref_orig_ind.push_back(ref_nan[diff_ind[i]]);
-                std::get<0>(result_tuple) = ref_orig_ind;
+                result.model_non_matching_pts = ref_orig_ind;
             }
 
             diff_ind.clear(); corresponding_ind.clear();
@@ -162,7 +163,7 @@ std::tuple<std::vector<int>, std::vector<int>, bool>  LocalObjectVerification::c
                 diff_ind.erase(diff_ind.begin() + small_cluster_ind[i]);
             }
             if (diff_ind.size() < 100) { //if less than 100 points left, we do not split the ref object
-                std::get<1>(result_tuple) = std::vector<int>{};
+                result.obj_non_matching_pts = std::vector<int>{};
             }
             //split the curr object cloud
             else {
@@ -187,26 +188,26 @@ std::tuple<std::vector<int>, std::vector<int>, bool>  LocalObjectVerification::c
                 std::vector<int> curr_orig_ind;
                 for (size_t i = 0; i < diff_ind.size(); i++)
                     curr_orig_ind.push_back(curr_nan[diff_ind[i]]);
-                std::get<1>(result_tuple) = curr_orig_ind;
+                result.obj_non_matching_pts = curr_orig_ind;
             }
         }
-        std::get<2>(result_tuple) = true;
+        result.found_alignment = true;
         // no correspondence found
     } else {
         //tranform back to orig ind
         std::vector<int> ref_orig_ind;
         for (size_t i = 0; i < ref_nan.size(); i++)
             ref_orig_ind.push_back(ref_nan[i]);
-        std::get<0>(result_tuple) = ref_orig_ind;
+        result.model_non_matching_pts = ref_orig_ind;
 
         //tranform back to orig ind
         std::vector<int> curr_orig_ind;
         for (size_t i = 0; i < curr_nan.size(); i++)
             curr_orig_ind.push_back(curr_nan[i]);
-        std::get<1>(result_tuple) = curr_orig_ind;
+        result.obj_non_matching_pts = curr_orig_ind;
 
-        std::get<2>(result_tuple) = false;
+        result.found_alignment = false;
     }
 
-    return result_tuple;
+    return result;
 }

@@ -491,6 +491,8 @@ int main(int argc, char* argv[])
     result_path =  result_path + "/" + timestamp + (do_LV_before_matching ? "_withLV":"" );
     boost::filesystem::create_directories(result_path);
 
+    boost::filesystem::copy(ppf_config_path_path, result_path+"/config.ini");
+
     //----------------------------setup ppf model folder-------------------------------
     ppf_model_path = result_path + "/model_objects/";
     boost::filesystem::create_directories(ppf_model_path);

@@ -157,11 +157,11 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
 
                 //compute confidence based on normals and color between object and model
                 object_hypotheses.obj_pts_not_explained_cloud = object_vec_[i].getObjectCloud();
-                std::tuple<float,float> obj_model_conf = computeModelFitness(object_vec_[i].getObjectCloud(), model_aligned_refined, ppf_params);
+                FitnessScoreStruct fitness_score  = computeModelFitness(object_vec_[i].getObjectCloud(), model_aligned_refined, ppf_params);
 
                 //TODO: combined or max fitness score?
                 //h->confidence_ = (std::get<0>(obj_model_conf) + std::get<1>(obj_model_conf)) / 2;
-                h->confidence_ = std::max(std::get<0>(obj_model_conf), std::get<1>(obj_model_conf));
+                h->confidence_ = std::max(fitness_score.object_conf, fitness_score.model_conf);
                 std::cout << "Confidence " << object_hypotheses.object_id << "-" << h->model_id_ << " " << h->confidence_ << std::endl;
 
                 std::string result_cloud_path = cloud_matches_dir + "/matchResult_model_" + h->model_id_ +"_conf_" + std::to_string(h->confidence_)+ "_" +
@@ -265,10 +265,10 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
                 else {
                     typename pcl::PointCloud<PointNormal>::Ptr model_aligned_refined(new pcl::PointCloud<PointNormal>());
                     pcl::transformPointCloudWithNormals(*(model_id_cloud.at(model_id)), *model_aligned_refined, oh->pose_refinement_ * oh->transform_);
-                    std::tuple<float,float> obj_model_conf = computeModelFitness(ohs.obj_pts_not_explained_cloud, model_aligned_refined, ppf_params);
+                     FitnessScoreStruct fitness_score  = computeModelFitness(ohs.obj_pts_not_explained_cloud, model_aligned_refined, ppf_params);
                     //TODO: combined or max fitness score?
                     //h->confidence_ = (std::get<0>(obj_model_conf) + std::get<1>(obj_model_conf)) / 2;
-                    oh->confidence_ = std::max(std::get<0>(obj_model_conf), std::get<1>(obj_model_conf));
+                    oh->confidence_ = std::max(fitness_score.object_conf, fitness_score.model_conf);
                 }
             }
             ohs.hypotheses.erase(std::remove_if(ohs.hypotheses.begin(),ohs.hypotheses.end(), [&ppf_params](const auto &a){ return a.ohs_[0]->confidence_ < ppf_params.min_graph_conf_thr_ ; }), ohs.hypotheses.end());
@@ -287,7 +287,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
     std::cout << "Time spent to recognize objects with PPF: " << (ppf_rec_time_sum/1000) << " seconds." << std::endl;
 
     for (size_t m = 0; m < model_obj_matches.size(); m++) {
-        const Match &match = model_obj_matches[m];
+        Match &match = model_obj_matches[m];
         int obj_id = match.object_id;
         int model_id = match.model_id;
         std::vector<DetectedObject>::iterator co_iter = std::find_if( object_vec_.begin(), object_vec_.end(),[&obj_id](DetectedObject const &o) {return o.getID() == obj_id; });
@@ -303,6 +303,9 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
 
         pcl::PointCloud<PointNormal>::Ptr model_aligned(new pcl::PointCloud<PointNormal>());
         pcl::transformPointCloudWithNormals(*model_cloud, *model_aligned, match.transform);
+
+        //fill in FitnessInformation
+        match.fitness_score  = computeModelFitness(object_cloud, model_aligned, ppf_params);
 
         //remove points from MODEL object input cloud
         SceneDifferencingPoints scene_diff(point_dist_diff); //this influences how many of the neighbouring points get added to the model
@@ -562,7 +565,7 @@ bool ObjectMatching::isModelBelowPlane(pcl::PointCloud<PointNormal>::Ptr model, 
 
 
 
-std::tuple<float,float> ObjectMatching::computeModelFitness(pcl::PointCloud<PointNormal>::Ptr object, pcl::PointCloud<PointNormal>::Ptr model,
+FitnessScoreStruct ObjectMatching::computeModelFitness(pcl::PointCloud<PointNormal>::Ptr object, pcl::PointCloud<PointNormal>::Ptr model,
                                                             v4r::apps::PPFRecognizerParameter param) {
     std::vector<v4r::ModelSceneCorrespondence> model_object_c;
 
@@ -653,7 +656,9 @@ std::tuple<float,float> ObjectMatching::computeModelFitness(pcl::PointCloud<Poin
     float object_fit = objectFit.sum();
     float object_confidence = object->empty() ? 0.f : object_fit / object->size(); //nr_object_overlappingt_pts;
 
-    return std::make_tuple(object_confidence,model_confidence);
+    FitnessScoreStruct fitness_struct(object_confidence, model_confidence, object_explained_pts, model_explained_pts);
+
+    return fitness_struct;
 }
 
 //estimate the distance between model and object

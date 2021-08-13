@@ -282,13 +282,13 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
                     boost::filesystem::create_directories(LV_subfolder);
                     local_verification.setDebugOutputPath(LV_subfolder);
 
-                    std::tuple<std::vector<int>, std::vector<int>, bool> lv_result = local_verification.computeLV();
+                    LVResult lv_result = local_verification.computeLV();
 
 
                     //check if return value is empty cloud --> full match --> remove element in object vector
-                    if (std::get<2>(lv_result)) {
+                    if (lv_result.found_alignment) {
                         //full match reference
-                        if (std::get<0>(lv_result).size() == 0) {
+                        if (lv_result.model_non_matching_pts.size() == 0) {
                             DetectedObject obj = fromPlaneIndObjToDetectedObject(ref_cloud_downsampled, *ro_it); //copy plane
                             obj.setObjectCloud(ref_obj_cloud); //replace cloud
                             obj.state_ = ObjectState::STATIC;
@@ -302,7 +302,7 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
                             pcl::ExtractIndices<PointNormal> extract;
                             extract.setInputCloud (ref_obj_cloud);
                             pcl::PointIndices::Ptr ind (new pcl::PointIndices);
-                            ind->indices = std::get<0>(lv_result);
+                            ind->indices = lv_result.model_non_matching_pts;
                             extract.setIndices (ind);
                             extract.setKeepOrganized(false);
                             extract.setNegative (true);
@@ -313,11 +313,11 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
 
                             ref_obj_static.push_back(obj);
 
-                            ro_it->obj_indices = std::get<0>(lv_result);
+                            ro_it->obj_indices = lv_result.model_non_matching_pts;
                             ro_it++;
                         }
 
-                        if ( std::get<1>(lv_result).size() == 0) {
+                        if (lv_result.obj_non_matching_pts.size() == 0) {
                             DetectedObject obj = fromPlaneIndObjToDetectedObject(curr_cloud_downsampled, *co_it); //copy plane
                             obj.setObjectCloud(curr_obj_cloud); //replace cloud
                             obj.state_ = ObjectState::STATIC;
@@ -329,30 +329,28 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
                             //break; //if we break, the match will be not assigned to the objects
                         } else {
                             //extract matched  points
-                            if (curr_obj_cloud->size() != std::get<1>(lv_result).size()) {
-                                pcl::PointCloud<PointNormal>::Ptr object_cloud(new pcl::PointCloud<PointNormal>);
-                                pcl::ExtractIndices<PointNormal> extract;
-                                extract.setInputCloud (curr_obj_cloud);
-                                pcl::PointIndices::Ptr ind (new pcl::PointIndices);
-                                ind->indices = std::get<1>(lv_result);
-                                extract.setIndices (ind);
-                                extract.setKeepOrganized(false);
-                                extract.setNegative (true);
-                                extract.filter (*object_cloud);
-                                DetectedObject obj = fromPlaneIndObjToDetectedObject(curr_cloud_downsampled, *co_it); //copy plane
-                                obj.setObjectCloud(object_cloud); //replace cloud
-                                obj.state_ = ObjectState::STATIC;
+                            pcl::PointCloud<PointNormal>::Ptr object_cloud(new pcl::PointCloud<PointNormal>);
+                            pcl::ExtractIndices<PointNormal> extract;
+                            extract.setInputCloud (curr_obj_cloud);
+                            pcl::PointIndices::Ptr ind (new pcl::PointIndices);
+                            ind->indices = lv_result.obj_non_matching_pts;
+                            extract.setIndices (ind);
+                            extract.setKeepOrganized(false);
+                            extract.setNegative (true);
+                            extract.filter (*object_cloud);
+                            DetectedObject obj = fromPlaneIndObjToDetectedObject(curr_cloud_downsampled, *co_it); //copy plane
+                            obj.setObjectCloud(object_cloud); //replace cloud
+                            obj.state_ = ObjectState::STATIC;
 
-                                curr_obj_static.push_back(obj);
+                            curr_obj_static.push_back(obj);
 
-                                co_it->obj_indices = std::get<1>(lv_result);
-                                curr_obj_cloud = fromObjectVecToObjectCloud({*co_it}, curr_cloud_downsampled);
-                            }
+                            co_it->obj_indices = lv_result.obj_non_matching_pts;
+                            curr_obj_cloud = fromObjectVecToObjectCloud({*co_it}, curr_cloud_downsampled);
                         }
                         /// associate the static objects
                         DetectedObject &matched_ref = ref_obj_static.back();
                         DetectedObject &matched_curr = curr_obj_static.back();
-                        Match m(matched_ref.getID(), matched_curr.getID(), 1.0, Eigen::Matrix4f::Identity());
+                        Match m(matched_ref.getID(), matched_curr.getID(), 1.0, Eigen::Matrix4f::Identity(), lv_result.fitness_score);
                         matched_ref.match_ = m;
                         matched_curr.match_ = m;
 
@@ -1119,8 +1117,8 @@ void ChangeDetection::matchAndRemoveObjects (pcl::PointCloud<PointNormal>::Ptr r
 
         //check color
         v4r::apps::PPFRecognizerParameter params;
-        std::tuple<float,float> obj_model_conf = ObjectMatching::computeModelFitness(object_registered, remaining_cloud_crop, params);
-        if (std::get<0>(obj_model_conf) > 0.7) {
+        FitnessScoreStruct fitness_score = ObjectMatching::computeModelFitness(object_registered, remaining_cloud_crop, params);
+        if (fitness_score.object_conf > 0.7) {
             obj_iter = extracted_objects.erase(obj_iter);
         }
         else {
