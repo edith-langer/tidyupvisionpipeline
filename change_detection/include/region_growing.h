@@ -20,7 +20,7 @@ public:
     RegionGrowing(typename pcl::PointCloud<PointT>::ConstPtr scene, typename pcl::PointCloud<PointQ>::ConstPtr object,
                   pcl::PointCloud<pcl::Normal>::ConstPtr scene_normals, bool is_object_downsampled,
                   float color_thr=std::numeric_limits<float>::max(),
-                  double octree_res=0.01, float eps_angle_threshold_deg=5, float max_neighbour_distance=0.02, float curvature_threshold=0.08
+                  double octree_res=0.05, float eps_angle_threshold_deg=10, float max_neighbour_distance=0.02, float curvature_threshold=0.08
                   ) :
         scene_(scene), object_(object), scene_normals_(scene_normals), is_object_downsampled_(is_object_downsampled),
         octree_res_(octree_res), eps_angle_threshold_deg_(eps_angle_threshold_deg),
@@ -117,9 +117,9 @@ public:
                     if (processed_scene[nn_indices[j]] || !pcl::isFinite(scene_->points[nn_indices[j]]))  // Has this point been processed before ?
                         continue;
 
-                    if (scene_normals_->points[nn_indices[j]].curvature > curvature_threshold_)
-                        //std::cout << "Neighbour point high curvature" <<std::endl;
-                        continue;
+//                    if (scene_normals_->points[nn_indices[j]].curvature > curvature_threshold_)
+//                        //std::cout << "Neighbour point high curvature" <<std::endl;
+//                        continue;
 
                     Eigen::Vector3f n1;
                     n1 = query_n.getNormalVector3fMap();

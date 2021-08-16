@@ -35,7 +35,7 @@ struct LocalObjectVerificationParams {
 struct LVResult {
     std::vector<int> obj_non_matching_pts;
     std::vector<int> model_non_matching_pts;
-    bool found_alignment;
+    Eigen::Matrix<float,4,4,Eigen::DontAlign> transform_obj_to_model;
     FitnessScoreStruct fitness_score;
 };
 

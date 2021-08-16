@@ -61,6 +61,7 @@ public:
 
     void compute(std::vector<DetectedObject> &ref_result, std::vector<DetectedObject> &curr_result);
     static pcl::PointCloud<PointNormal>::Ptr downsampleCloud(pcl::PointCloud<PointNormal>::Ptr input, double leafSize);
+    static void mergeObjectParts(std::vector<DetectedObject> &detected_objects);
 
 private:
     //std::string object_store_path_; //the model objects and their ppf model get stored here --> for now we store everything in output path

@@ -102,6 +102,7 @@ LVResult LocalObjectVerification::computeLV() {
     std::cout << "has converged:" << icp.hasConverged() << " score: " << icp.getFitnessScore() << std::endl;
 
     if (icp.hasConverged() && icp.getFitnessScore()) {
+        result.transform_obj_to_model = icp.getFinalTransformation();
         v4r::apps::PPFRecognizerParameter params;
         FitnessScoreStruct fitness_score  = ObjectMatching::computeModelFitness(curr_object_registered, ref_object_noNans, params);
         result.fitness_score = fitness_score;
@@ -191,7 +192,6 @@ LVResult LocalObjectVerification::computeLV() {
                 result.obj_non_matching_pts = curr_orig_ind;
             }
         }
-        result.found_alignment = true;
         // no correspondence found
     } else {
         //tranform back to orig ind
@@ -206,7 +206,7 @@ LVResult LocalObjectVerification::computeLV() {
             curr_orig_ind.push_back(curr_nan[i]);
         result.obj_non_matching_pts = curr_orig_ind;
 
-        result.found_alignment = false;
+        result.transform_obj_to_model = Eigen::Matrix4f::Identity();
     }
 
     return result;

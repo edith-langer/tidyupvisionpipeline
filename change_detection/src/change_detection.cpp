@@ -286,7 +286,7 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
 
 
                     //check if return value is empty cloud --> full match --> remove element in object vector
-                    if (lv_result.found_alignment) {
+                    if (lv_result.transform_obj_to_model != Eigen::Matrix4f::Identity()) {
                         //full match reference
                         if (lv_result.model_non_matching_pts.size() == 0) {
                             DetectedObject obj = fromPlaneIndObjToDetectedObject(ref_cloud_downsampled, *ro_it); //copy plane
@@ -350,7 +350,8 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
                         /// associate the static objects
                         DetectedObject &matched_ref = ref_obj_static.back();
                         DetectedObject &matched_curr = curr_obj_static.back();
-                        Match m(matched_ref.getID(), matched_curr.getID(), 1.0, Eigen::Matrix4f::Identity(), lv_result.fitness_score);
+
+                        Match m(matched_ref.getID(), matched_curr.getID(), 1.0, lv_result.transform_obj_to_model, lv_result.fitness_score);
                         matched_ref.match_ = m;
                         matched_curr.match_ = m;
 
@@ -423,6 +424,18 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
         pcl::io::savePCDFileBinary(curr_res_path + "/curr_static_cloud.pcd", *curr_static_cloud);
     }
 
+    //recompute Fitness score with upsampled version (there should be exactly the same number of static ref and curr objects)
+    v4r::apps::PPFRecognizerParameter params;
+    for (size_t i = 0; i < ref_obj_static.size(); i++) {
+        pcl::PointCloud<PointNormal>::Ptr object_aligned (new pcl::PointCloud<PointNormal>);
+        pcl::transformPointCloud(*curr_obj_static[i].getObjectCloud(), *object_aligned, ref_obj_static[i].match_.transform);
+        FitnessScoreStruct fitness_score = ObjectMatching::computeModelFitness(object_aligned, ref_obj_static[i].getObjectCloud(), params);
+        ref_obj_static[i].match_.fitness_score = fitness_score;
+        curr_obj_static[i].match_.fitness_score = fitness_score;
+    }
+
+
+
 
     //------------------Match detected objects against each other with PPF-----------------------
     //depending on if LV was performed before, static objects can be matched
@@ -447,6 +460,8 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
         ref_result = ref_objects_vec;
         ref_result.insert(ref_result.end(), ref_obj_static.begin(), ref_obj_static.end());
         curr_result.insert(curr_result.end(), curr_obj_static.begin(), curr_obj_static.end());
+        mergeObjectParts(ref_result);
+        mergeObjectParts(curr_result);
         return;
     }
 
@@ -469,8 +484,13 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
         curr_result = curr_objects_vec;
         curr_result.insert(curr_result.end(), curr_obj_static.begin(), curr_obj_static.end());
         ref_result.insert(ref_result.end(), ref_obj_static.begin(), ref_obj_static.end());
+        mergeObjectParts(ref_result);
+        mergeObjectParts(curr_result);
         return;
     }
+
+    mergeObjectParts(ref_result);
+    mergeObjectParts(curr_result);
 
     //matches between same plane different timestamps
     ObjectMatching object_matching(ref_objects_vec, curr_objects_vec, ppf_model_path_, ppf_config_path_);
@@ -479,51 +499,8 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
     //region growing of static/displaced objects (should create more precise results if e.g. the model was smaller than die object or not precisely aligned
     ref_result.insert(ref_result.end(), ref_obj_static.begin(), ref_obj_static.end());
     curr_result.insert(curr_result.end(), curr_obj_static.begin(), curr_obj_static.end());
-    cleanResult(ref_result);
-    cleanResult(curr_result);
-    //this can lead to empty clouds when a new/removed object was completely added to a static/displaced one
-    //empty objects get removed a few lines below
-
-    //removeClusterOutliers
-    for (DetectedObject & o : ref_result) {
-        std::vector<pcl::PointIndices> cluster_indices = ObjectMatching::clusterOutliersBySize(o.getObjectCloud(), small_cluster_ind, 0.01);
-        pcl::ExtractIndices<PointNormal> extract;
-        extract.setInputCloud (o.getObjectCloud());
-        pcl::PointIndices::Ptr c_ind (new pcl::PointIndices);
-        for (size_t i = 0; i < cluster_indices.size(); i++) {
-            c_ind->indices.insert(std::end(c_ind->indices), std::begin(cluster_indices.at(i).indices), std::end(cluster_indices.at(i).indices));
-        }
-        extract.setIndices (c_ind);
-        extract.setKeepOrganized(false);
-        extract.setNegative (false);
-        extract.filter (*o.getObjectCloud());
-    }
-    for (DetectedObject & o : curr_result) {
-        std::vector<pcl::PointIndices> cluster_indices = ObjectMatching::clusterOutliersBySize(o.getObjectCloud(), small_cluster_ind, 0.01);
-        pcl::ExtractIndices<PointNormal> extract;
-        extract.setInputCloud (o.getObjectCloud());
-        pcl::PointIndices::Ptr c_ind (new pcl::PointIndices);
-        for (size_t i = 0; i < cluster_indices.size(); i++) {
-            c_ind->indices.insert(std::end(c_ind->indices), std::begin(cluster_indices.at(i).indices), std::end(cluster_indices.at(i).indices));
-        }
-        extract.setIndices (c_ind);
-        extract.setKeepOrganized(false);
-        extract.setNegative (false);
-        extract.filter (*o.getObjectCloud());
-    }
-
-    //remove objects that have an empty cloud now
-    ref_result.erase(std::remove_if(
-                         ref_result.begin(),
-                         ref_result.end(),
-                         [&](DetectedObject const & o) { return o.getObjectCloud()->size() == 0; }
-                     ), ref_result.end());
-    curr_result.erase(std::remove_if(
-                          curr_result.begin(),
-                          curr_result.end(),
-                          [&](DetectedObject const & o) { return o.getObjectCloud()->size() == 0; }
-                      ), curr_result.end());
-
+    mergeObjectParts(ref_result);
+    mergeObjectParts(curr_result);
 }
 
 // v4r/common/Downsampler.cpp has a more advanced method if normals are given
@@ -998,6 +975,117 @@ void ChangeDetection::refineNormals(pcl::PointCloud<PointNormal>::Ptr object_clo
 
     pcl::concatenateFields(*object_cloud, *object_normals, *object_cloud); //data in the second cloud will overwrite the data in the first
 }
+
+void ChangeDetection::mergeObjectParts(std::vector<DetectedObject> &detected_objects) {
+    for (size_t i = 0; i < detected_objects.size(); i++) {
+        if (detected_objects[i].state_ == ObjectState::NEW || detected_objects[i].state_ == ObjectState::REMOVED) {
+            for (size_t j = 0; j < detected_objects.size(); j++) {
+                if (detected_objects[j].state_ == ObjectState::STATIC || detected_objects[j].state_ == ObjectState::DISPLACED) {
+
+                    if (detected_objects[j].getObjectCloud()->empty() || detected_objects[i].getObjectCloud()->empty())
+                        continue;
+
+                    pcl::PointCloud<PointNormal>::Ptr good_pts(new pcl::PointCloud<PointNormal>);
+                    if (detected_objects[i].state_ == ObjectState::NEW && detected_objects[j].getID() == detected_objects[j].match_.object_id) {
+                        pcl::ExtractIndices<PointNormal> extract;
+                        extract.setInputCloud (detected_objects[j].getObjectCloud());
+                        pcl::PointIndices::Ptr obj_ind(new pcl::PointIndices);
+                        obj_ind->indices = detected_objects[j].match_.fitness_score.object_overlapping_pts;
+                        extract.setIndices (obj_ind);
+                        extract.setNegative (false);
+                        extract.setKeepOrganized(false);
+                        extract.filter(*good_pts);
+                    } else if (detected_objects[i].state_ == ObjectState::REMOVED && detected_objects[j].getID() == detected_objects[j].match_.model_id) {
+                        pcl::ExtractIndices<PointNormal> extract;
+                        extract.setInputCloud (detected_objects[j].getObjectCloud());
+                        pcl::PointIndices::Ptr obj_ind(new pcl::PointIndices);
+                        obj_ind->indices = detected_objects[j].match_.fitness_score.model_overlapping_pts;
+                        extract.setIndices (obj_ind);
+                        extract.setNegative (false);
+                        extract.setKeepOrganized(false);
+                        extract.filter(*good_pts);
+                    }
+                    else
+                        continue;
+
+                    //call the region growing method
+
+//                    pcl::io::savePCDFileBinary("/home/edith/Desktop/before_rg_j.pcd", *good_pts);
+//                    pcl::io::savePCDFileBinary("/home/edith/Desktop/before_rg_i.pcd", *detected_objects[i].getObjectCloud());
+
+                    pcl::PointCloud<PointNormal>::Ptr combined_object(new pcl::PointCloud<PointNormal>);
+                    *combined_object += *detected_objects[i].getObjectCloud();
+                    *combined_object += *detected_objects[j].getObjectCloud();;
+                    pcl::PointCloud<pcl::Normal>::Ptr scene_normals(new pcl::PointCloud<pcl::Normal>);
+                    pcl::copyPointCloud(*combined_object, *scene_normals);
+                    RegionGrowing<PointNormal, PointNormal> region_growing(combined_object, good_pts, scene_normals, false, 20.0);
+                    std::vector<int> add_object_ind = region_growing.compute();
+
+                    //nothing was added to the static/displaced object
+                    if (add_object_ind.size() == detected_objects[j].getObjectCloud()->size())
+                        continue;
+
+                    //if less than 100 points remain, add everything to the static/displaced object
+                    if (combined_object->size() - add_object_ind.size() < 100) {
+                        detected_objects[j].setObjectCloud(combined_object);
+                        detected_objects[i].setObjectCloud(boost::make_shared<pcl::PointCloud<PointNormal>>());
+                    }
+
+                    else {
+                        pcl::ExtractIndices<PointNormal> extract;
+                        extract.setInputCloud (combined_object);
+                        pcl::PointIndices::Ptr obj_ind(new pcl::PointIndices);
+                        obj_ind->indices = add_object_ind;
+                        extract.setIndices (obj_ind);
+                        extract.setNegative (false);
+                        extract.setKeepOrganized(false);
+                        extract.filter(*detected_objects[j].getObjectCloud());
+
+                        extract.setNegative (true);
+                        extract.setKeepOrganized(false);
+                        extract.filter(*detected_objects[i].getObjectCloud());
+
+//                        if (!detected_objects[j].getObjectCloud()->empty())
+//                            pcl::io::savePCDFileBinary("/home/edith/Desktop/middle_rg_j.pcd", *detected_objects[j].getObjectCloud());
+//                        if (!detected_objects[i].getObjectCloud()->empty())
+//                            pcl::io::savePCDFileBinary("/home/edith/Desktop/middle_rg_i.pcd", *detected_objects[i].getObjectCloud());
+
+                        //remove very small clusters
+                        std::vector<int> small_cluster_ind;
+                        ObjectMatching::clusterOutliersBySize(detected_objects[i].getObjectCloud(), small_cluster_ind, 0.014, 100);
+
+                        pcl::PointCloud<PointNormal>::Ptr small_cluster_cloud(new pcl::PointCloud<PointNormal>);
+                        extract.setInputCloud (detected_objects[i].getObjectCloud());
+                        obj_ind->indices = small_cluster_ind;
+                        extract.setIndices (obj_ind);
+                        extract.setNegative (false);
+                        extract.setKeepOrganized(false);
+                        extract.filter(*small_cluster_cloud);
+                        *detected_objects[j].getObjectCloud() += *small_cluster_cloud;
+
+                        extract.setNegative (true);
+                        extract.setKeepOrganized(false);
+                        extract.filter(*detected_objects[i].getObjectCloud());
+
+//                        if (!detected_objects[j].getObjectCloud()->empty())
+//                            pcl::io::savePCDFileBinary("/home/edith/Desktop/after_rg_j.pcd", *detected_objects[j].getObjectCloud());
+//                        if (!detected_objects[i].getObjectCloud()->empty())
+//                            pcl::io::savePCDFileBinary("/home/edith/Desktop/after_rg_i.pcd", *detected_objects[i].getObjectCloud());
+                    }
+                }
+            }
+        }
+    }
+
+    //remove objects that have an empty cloud now
+    detected_objects.erase(std::remove_if(
+                         detected_objects.begin(),
+                         detected_objects.end(),
+                         [&](DetectedObject const & o) { return o.getObjectCloud()->size() == 0; }
+                     ), detected_objects.end());
+}
+
+
 
 
 //TODO not only for one plane, but in the end of the whole pipeline!

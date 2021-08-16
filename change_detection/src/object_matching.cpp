@@ -265,7 +265,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
                 else {
                     typename pcl::PointCloud<PointNormal>::Ptr model_aligned_refined(new pcl::PointCloud<PointNormal>());
                     pcl::transformPointCloudWithNormals(*(model_id_cloud.at(model_id)), *model_aligned_refined, oh->pose_refinement_ * oh->transform_);
-                     FitnessScoreStruct fitness_score  = computeModelFitness(ohs.obj_pts_not_explained_cloud, model_aligned_refined, ppf_params);
+                    FitnessScoreStruct fitness_score  = computeModelFitness(ohs.obj_pts_not_explained_cloud, model_aligned_refined, ppf_params);
                     //TODO: combined or max fitness score?
                     //h->confidence_ = (std::get<0>(obj_model_conf) + std::get<1>(obj_model_conf)) / 2;
                     oh->confidence_ = std::max(fitness_score.object_conf, fitness_score.model_conf);
@@ -303,9 +303,6 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
 
         pcl::PointCloud<PointNormal>::Ptr model_aligned(new pcl::PointCloud<PointNormal>());
         pcl::transformPointCloudWithNormals(*model_cloud, *model_aligned, match.transform);
-
-        //fill in FitnessInformation
-        match.fitness_score  = computeModelFitness(object_cloud, model_aligned, ppf_params);
 
         //remove points from MODEL object input cloud
         SceneDifferencingPoints scene_diff(point_dist_diff); //this influences how many of the neighbouring points get added to the model
@@ -353,19 +350,8 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
             ro_iter->match_ = match;
             ro_iter->object_folder_path_="";
 
-            //the remaining part of the model
-            DetectedObject diff_model_part(model_diff_cloud, ro_iter->plane_cloud_, ro_iter->supp_plane_, ObjectState::REMOVED, "");
 
-            //update matches with the new ID! Except for co_iter
-            for (size_t k = 0; k < model_obj_matches.size(); k++) {
-                if (model_obj_matches[k].model_id == ro_iter->getID() && model_obj_matches[k].object_id != ro_iter->match_.object_id) {
-                    model_obj_matches[k].model_id = diff_model_part.getID();
-                }
-            }
-
-
-            //ATTENTION: The ro_iter is invalid now because of the push_back. Vector re-allocates and invalidates pointers
-            model_vec_.push_back((diff_model_part));
+            //we add the diff_model_part later to the model_vec because it invalidates the vector
         }
 
         //remove points from OBJECT object input cloud
@@ -409,18 +395,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
             co_iter->match_ = match;
             co_iter->object_folder_path_="";
 
-            //the remaining part of the object
-            DetectedObject diff_object_part(object_diff_cloud, co_iter->plane_cloud_, co_iter->supp_plane_, ObjectState::NEW, "");
-
-            //update matches with the new ID! Except for co_iter
-            for (size_t k = 0; k < model_obj_matches.size(); k++) {
-                if (model_obj_matches[k].object_id == co_iter->getID() && model_obj_matches[k].model_id != co_iter->match_.model_id) {
-                    model_obj_matches[k].object_id = diff_object_part.getID();
-                }
-            }
-
-            //ATTENTION: The co_iter is invalid now because of the push_back. Vector re-allocates and invalidates pointers
-            object_vec_.push_back(diff_object_part);
+            //we add the diff_object_part later to the model_vec because it invalidates the vector
 
             //save the new partly matched object
             boost::filesystem::path model_path_orig(model_path_);
@@ -433,6 +408,42 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
 
             //pcl::io::savePCDFile("/home/edith/object_part.pcd", *matched_object_part);
             //pcl::io::savePCDFile("/home/edith/object_remaining.pcd", *object_diff_cloud);
+        }
+        //recompute FitnessInformation
+        v4r::apps::PPFRecognizerParameter params;
+        pcl::PointCloud<PointNormal>::Ptr object_aligned (new pcl::PointCloud<PointNormal>);
+        pcl::transformPointCloud(*co_iter->getObjectCloud(), *object_aligned, match.transform.inverse());
+        FitnessScoreStruct fitness_score = computeModelFitness(object_aligned, ro_iter->getObjectCloud(), params);
+        co_iter->match_.fitness_score = fitness_score;
+        ro_iter->match_.fitness_score = fitness_score;
+
+
+        //ATTENTION: The ro_iter is invalid now because of the push_back. Vector re-allocates and invalidates pointers
+        if (model_diff_cloud->size() > 0) {
+            //the remaining part of the model
+            DetectedObject diff_model_part(model_diff_cloud, ro_iter->plane_cloud_, ro_iter->supp_plane_, ObjectState::REMOVED, "");
+
+            //update matches with the new ID! Except for co_iter
+            for (size_t k = 0; k < model_obj_matches.size(); k++) {
+                if (model_obj_matches[k].model_id == ro_iter->getID() && model_obj_matches[k].object_id != ro_iter->match_.object_id) {
+                    model_obj_matches[k].model_id = diff_model_part.getID();
+                }
+            }
+            model_vec_.push_back(diff_model_part);
+        }
+
+        //ATTENTION: The co_iter is invalid now because of the push_back. Vector re-allocates and invalidates pointers
+        if (object_diff_cloud->size() > 0) {
+            //the remaining part of the object
+            DetectedObject diff_object_part(object_diff_cloud, co_iter->plane_cloud_, co_iter->supp_plane_, ObjectState::NEW, "");
+
+            //update matches with the new ID! Except for co_iter
+            for (size_t k = 0; k < model_obj_matches.size(); k++) {
+                if (model_obj_matches[k].object_id == co_iter->getID() && model_obj_matches[k].model_id != co_iter->match_.model_id) {
+                    model_obj_matches[k].object_id = diff_object_part.getID();
+                }
+            }
+            object_vec_.push_back(diff_object_part);
         }
     }
 
@@ -501,14 +512,15 @@ std::vector<Match> ObjectMatching::weightedGraphMatching(std::vector<ObjectHypot
             auto ed = boost::edge(*vi, mate[*vi], g); //returns pair<edge_descriptor, bool>, where bool indicates if edge exists or not
             float edge_weight = boost::get(boost::edge_weight_t(), g, ed.first);
             Eigen::Matrix4f edge_transformation = boost::get(transformation_t(), g, ed.first);
-            std::cout << "{" << g[*vi].name << ", " << g[mate[*vi]].name << "} - " << std::sqrt(edge_weight) << std::endl;
+            float deampl_weight = std::log(edge_weight + 1) / 4;
+            std::cout << "{" << g[*vi].name << ", " << g[mate[*vi]].name << "} - " << deampl_weight << std::endl;
 
             //remove "_model" and "_object from the IDs (we added that before to be able to distinguish the nodes in the graph
             std::string m_name = g[*vi].name;
             std::string o_name = g[mate[*vi]].name;
             m_name.erase(m_name.length()-6, 6); //erase _model
             o_name.erase(o_name.length()-7, 7); //erase _object
-            Match m(std::stoi(m_name), std::stoi(o_name), std::sqrt(edge_weight), edge_transformation); //de-amplify
+            Match m(std::stoi(m_name), std::stoi(o_name), deampl_weight, edge_transformation); //de-amplify
             model_obj_match.push_back(m);
         }
     }
@@ -566,7 +578,7 @@ bool ObjectMatching::isModelBelowPlane(pcl::PointCloud<PointNormal>::Ptr model, 
 
 
 FitnessScoreStruct ObjectMatching::computeModelFitness(pcl::PointCloud<PointNormal>::Ptr object, pcl::PointCloud<PointNormal>::Ptr model,
-                                                            v4r::apps::PPFRecognizerParameter param) {
+                                                       v4r::apps::PPFRecognizerParameter param) {
     std::vector<v4r::ModelSceneCorrespondence> model_object_c;
 
     pcl::octree::OctreePointCloudSearch<PointNormal>::Ptr object_octree;
@@ -640,14 +652,22 @@ FitnessScoreStruct ObjectMatching::computeModelFitness(pcl::PointCloud<PointNorm
 
     //don't divide by the number of all points, but only by the number of overlapping  points --> better results for combined objects?
     //--> no because the conficence for only partly overlapping objects is very big then
+
+    //from bool array to indices
+    std::vector<int> obj_expl_ind, model_expl_ind;
+
     int nr_model_overlapping_pts = 0, nr_object_overlappingt_pts = 0;
     for (size_t i = 0; i < model_overlapping_pts.size(); i++) {
-        if (model_overlapping_pts[i])
+        if (model_overlapping_pts[i]) {
             nr_model_overlapping_pts++;
+            model_expl_ind.push_back(i);
+        }
     }
     for (size_t i = 0; i < object_overlapping_pts.size(); i++) {
-        if (object_overlapping_pts[i])
+        if (object_overlapping_pts[i]) {
             nr_object_overlappingt_pts++;
+            obj_expl_ind.push_back(i);
+        }
     }
 
     float model_fit = modelFit.sum();
@@ -656,7 +676,9 @@ FitnessScoreStruct ObjectMatching::computeModelFitness(pcl::PointCloud<PointNorm
     float object_fit = objectFit.sum();
     float object_confidence = object->empty() ? 0.f : object_fit / object->size(); //nr_object_overlappingt_pts;
 
-    FitnessScoreStruct fitness_struct(object_confidence, model_confidence, object_explained_pts, model_explained_pts);
+
+
+    FitnessScoreStruct fitness_struct(object_confidence, model_confidence, obj_expl_ind, model_expl_ind);
 
     return fitness_struct;
 }
@@ -708,7 +730,7 @@ void ObjectMatching::saveCloudResults(pcl::PointCloud<PointNormal>::Ptr object_c
 }
 
 
-//returns all valid clusters and indices that were removed are stored in removed_ind
+//returns all valid clusters and indices that were removed are stored in filtered_ind
 //the input cloud does not change!
 std::vector<pcl::PointIndices> ObjectMatching::clusterOutliersBySize(const pcl::PointCloud<PointNormal>::Ptr cloud, std::vector<int> &filtered_ind, float cluster_thr,
                                                                      int min_cluster_size, int max_cluster_size) {

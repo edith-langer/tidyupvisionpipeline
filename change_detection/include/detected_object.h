@@ -18,12 +18,12 @@ enum ObjectState {NEW, REMOVED, DISPLACED, STATIC, UNKNOWN};
 
 struct FitnessScoreStruct {
     FitnessScoreStruct() { object_conf = 0.0f; model_conf = 0.0f;}
-    FitnessScoreStruct(float o_c, float m_c, Eigen::Array<bool, Eigen::Dynamic, 1> o_pts, Eigen::Array<bool, Eigen::Dynamic, 1> m_pts ) :
+    FitnessScoreStruct(float o_c, float m_c, std::vector<int> o_pts, std::vector<int> m_pts ) :
         object_conf{o_c}, model_conf{m_c}, object_overlapping_pts{o_pts}, model_overlapping_pts{m_pts} {}
     float object_conf;
     float model_conf;
-    Eigen::Array<bool, Eigen::Dynamic, 1> object_overlapping_pts;
-    Eigen::Array<bool, Eigen::Dynamic, 1> model_overlapping_pts;
+    std::vector<int> object_overlapping_pts;
+    std::vector<int> model_overlapping_pts;
 };
 
 struct Match {

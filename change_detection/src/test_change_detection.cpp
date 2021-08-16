@@ -571,6 +571,9 @@ int main(int argc, char* argv[])
                 ref_result.clear(); curr_result.clear();
                 matching.compute(ref_result, curr_result);
 
+                ChangeDetection::mergeObjectParts(ref_result);
+                ChangeDetection::mergeObjectParts(curr_result);
+
                 updateDetectedObjects(ref_result, curr_result);
             }
         }
@@ -625,6 +628,9 @@ int main(int argc, char* argv[])
         ObjectMatching matching(pot_rem_obj_vec, pot_new_obj_vec, ppf_model_path, ppf_config_path_path);
         std::vector<DetectedObject> ref_result, curr_result;
         matching.compute(ref_result, curr_result);
+
+        ChangeDetection::mergeObjectParts(ref_result);
+        ChangeDetection::mergeObjectParts(curr_result);
 
         updateDetectedObjects(ref_result, curr_result);
     }
