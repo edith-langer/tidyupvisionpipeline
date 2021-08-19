@@ -464,6 +464,17 @@ std::map<int, ReconstructedPlane> prepareInputData(std::string data_path) {
     return rec_planes;
 }
 
+std::string extractSceneName(std::string path) {
+    size_t last_of;
+    last_of = path.find_last_of("/");
+
+    if (last_of == path.size()-1) {
+        path.erase(last_of,1);
+        last_of = path.find_last_of("/");
+    }
+    return path.substr(last_of+1, path.size()-1);
+}
+
 int main(int argc, char* argv[])
 {
     /// Check arguments and print info
@@ -487,8 +498,13 @@ int main(int argc, char* argv[])
     pcl::console::parse(argc, argv, "-c", ppf_config_path_path);
 
     //----------------------------setup result folder----------------------------------
+
+    //extract the two scene names
+    std::string ref_scene_name = extractSceneName(reference_path);
+    std::string curr_scene_name = extractSceneName(current_path);
+
     std::string timestamp = getCurrentTime();
-    result_path =  result_path + "/" + timestamp + (do_LV_before_matching ? "_withLV":"" );
+    result_path =  result_path + "/" + timestamp + (do_LV_before_matching ? "_withLV":"" ) + "/" + ref_scene_name + "-" + curr_scene_name + "/";
     boost::filesystem::create_directories(result_path);
 
     boost::filesystem::copy(ppf_config_path_path, result_path+"/config.ini");
@@ -696,6 +712,7 @@ int main(int argc, char* argv[])
         for (size_t i = 0; i < curr_objects_cloud->size(); i++) {
             curr_objects_cloud->points[i].label = ref_object.getID() * 20;
         }
+        pcl::io::savePCDFileBinary("/home/edith/Desktop/curr_object_displ.pcd", *curr_objects_cloud);
         *ref_displaced_objects_cloud += *ref_objects_cloud;
         *curr_displaced_objects_cloud += *curr_objects_cloud;
     }
