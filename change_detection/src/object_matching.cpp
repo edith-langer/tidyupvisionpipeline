@@ -149,9 +149,13 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
                 typename pcl::PointCloud<PointNormal>::Ptr model_aligned_refined(new pcl::PointCloud<PointNormal>());
                 pcl::transformPointCloudWithNormals(*model_cloud, *model_aligned_refined, h->pose_refinement_ * h->transform_); /// pose_refinment contains ICP result
 
-                //check if model is below supporting plane
-                if (isModelBelowPlane(model_aligned_refined, object_vec_[i].plane_cloud_)) {
-                    std::cout << "Model " << h->model_id_ << " is below plane and therefore not a valid solution" << std::endl;
+                //check if model and object are below supporting plane
+                typename pcl::PointCloud<PointNormal>::Ptr object_aligned(new pcl::PointCloud<PointNormal>());
+                pcl::transformPointCloudWithNormals(*object_vec_[i].getObjectCloud(), *object_aligned, (h->pose_refinement_ * h->transform_).inverse()); /// pose_refinment contains ICP result
+                int model_id = std::stoi(h->model_id_);
+                std::vector<DetectedObject>::iterator ro_iter = std::find_if( model_vec_.begin(), model_vec_.end(),[&model_id](DetectedObject const &o) {return o.getID() == model_id; });
+                if (isBelowPlane(model_aligned_refined, object_vec_[i].plane_cloud_) && isBelowPlane(object_aligned, ro_iter->plane_cloud_)) {
+                    std::cout << "Model and object " << h->model_id_ << " are below plane and therefore not a valid solution" << std::endl;
                     continue;
                 }
 
@@ -298,7 +302,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
         const pcl::PointCloud<PointNormal>::Ptr object_cloud = co_iter->getObjectCloud();
 
         //compute distance between object and model
-        float dist = computeDistance(object_cloud, model_cloud, match.transform);
+        float dist = estimateDistance(object_cloud, model_cloud, match.transform);
         bool is_static = dist < max_dist_for_being_static;
 
         pcl::PointCloud<PointNormal>::Ptr model_aligned(new pcl::PointCloud<PointNormal>());
@@ -531,7 +535,7 @@ std::vector<Match> ObjectMatching::weightedGraphMatching(std::vector<ObjectHypot
 //check if hypothesis is below floor (in hypotheses_verification.cpp a method exists using the convex hull)
 //compute the z_value_threshold from the supporting plane
 //checking for flying objects would not allow to keep true match of stacked objects
-bool ObjectMatching::isModelBelowPlane(pcl::PointCloud<PointNormal>::Ptr model, pcl::PointCloud<PointNormal>::Ptr plane_cloud) {
+bool ObjectMatching::isBelowPlane(pcl::PointCloud<PointNormal>::Ptr model, pcl::PointCloud<PointNormal>::Ptr plane_cloud) {
 
     PointNormal minPoint, maxPoint;
     pcl::getMinMax3D(*model, minPoint, maxPoint);
@@ -685,7 +689,7 @@ FitnessScoreStruct ObjectMatching::computeModelFitness(pcl::PointCloud<PointNorm
 
 //estimate the distance between model and object
 //transform the model to the object coordinate system, find point pairs and based on these compute the distance between the original model and the object
-float ObjectMatching::computeDistance(const pcl::PointCloud<PointNormal>::Ptr object_cloud, const pcl::PointCloud<PointNormal>::Ptr model_cloud, const Eigen::Matrix4f transform) {
+float ObjectMatching::estimateDistance(const pcl::PointCloud<PointNormal>::Ptr object_cloud, const pcl::PointCloud<PointNormal>::Ptr model_cloud, const Eigen::Matrix4f transform) {
     pcl::PointCloud<PointNormal>::Ptr model_transformed (new pcl::PointCloud<PointNormal>);
     pcl::transformPointCloudWithNormals(*model_cloud, *model_transformed, transform);
 

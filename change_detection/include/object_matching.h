@@ -85,7 +85,7 @@ public:
     std::vector<Match> compute(std::vector<DetectedObject> &ref_result, std::vector<DetectedObject> &curr_result);
     static FitnessScoreStruct computeModelFitness(pcl::PointCloud<PointNormal>::Ptr object, pcl::PointCloud<PointNormal>::Ptr model,
                                                         v4r::apps::PPFRecognizerParameter param);
-    static float computeDistance(const pcl::PointCloud<PointNormal>::Ptr object_cloud, const pcl::PointCloud<PointNormal>::Ptr model_cloud, const Eigen::Matrix4f transform);
+    static float estimateDistance(const pcl::PointCloud<PointNormal>::Ptr object_cloud, const pcl::PointCloud<PointNormal>::Ptr model_cloud, const Eigen::Matrix4f transform);
     static std::vector<pcl::PointIndices> clusterOutliersBySize(const pcl::PointCloud<PointNormal>::Ptr cloud, std::vector<int> &removed_ind, float cluster_thr,
                                                                 int min_cluster_size=15, int max_cluster_size=std::numeric_limits<int>::max());
 
@@ -98,7 +98,7 @@ private:
 
     void saveCloudResults(pcl::PointCloud<PointNormal>::Ptr object_cloud, pcl::PointCloud<PointNormal>::Ptr model_aligned,
                           pcl::PointCloud<PointNormal>::Ptr model_aligned_refined, std::string path);
-    bool isModelBelowPlane(pcl::PointCloud<PointNormal>::Ptr model, pcl::PointCloud<PointNormal>::Ptr plane_cloud);
+    bool isBelowPlane(pcl::PointCloud<PointNormal>::Ptr model, pcl::PointCloud<PointNormal>::Ptr plane_cloud);
     std::vector<Match> weightedGraphMatching(std::vector<ObjectHypothesesStruct> global_hypotheses);
 
 };
