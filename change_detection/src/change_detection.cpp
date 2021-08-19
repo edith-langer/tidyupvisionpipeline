@@ -176,7 +176,7 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
         objectRegionGrowing(curr_cloud_downsampled, curr_objects);  //this removes very big clusters after growing
         mergeObjects(curr_objects); //in case an object was detected several times (disjoint sets originally, but prob. overlapping after region growing)
         novel_objects_cloud = fromObjectVecToObjectCloud(curr_objects, curr_cloud_downsampled);
-        pcl::io::savePCDFileBinary(curr_res_path + "/result_after_LV_objectGrowing.pcd", *novel_objects_cloud);
+        pcl::io::savePCDFileBinary(curr_res_path + "/result_after_objectGrowing.pcd", *novel_objects_cloud);
     }
 
     if (ref_objects.size() > 0) {
@@ -202,8 +202,8 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
         LocalObjectVerificationParams lv_params{diff_dist, add_crop_static, icp_max_corr_dist, icp_max_corr_dist_plane,
                     icp_max_iter, icp_ransac_thr, color_weight, overlap_weight, min_score_thr};
 
-        bool erased_co_elem=false;
         for (std::vector<PlaneWithObjInd>::iterator co_it = curr_objects.begin(); co_it != curr_objects.end();) {
+            bool erased_co_elem=false;
             pcl::PointCloud<PointNormal>::Ptr curr_obj_cloud = fromObjectVecToObjectCloud({*co_it}, curr_cloud_downsampled);
 
             pcl::PointCloud<PointNormal>::Ptr curr_plane_cloud(new pcl::PointCloud<PointNormal>);
@@ -246,8 +246,10 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
                 pass.setFilterLimits(minPt_object.z - crop_margin, maxPt_object.z + crop_margin);
                 pass.filter(*cloud_crop);
 
-                if (cloud_crop->empty())
+                if (cloud_crop->empty()) {
+                    ro_it++;
                     continue;
+                }
 
                 //else do LV
                 pcl::PointCloud<PointNormal>::Ptr ref_obj_cloud = fromObjectVecToObjectCloud({*ro_it}, ref_cloud_downsampled);
@@ -274,6 +276,7 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
 
                 if (!is_obj_close) {
                     ro_it++;
+                    continue;
                 }
                 else {
                     LocalObjectVerification local_verification(ref_obj_cloud, curr_obj_cloud, lv_params);
@@ -285,7 +288,7 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
                     LVResult lv_result = local_verification.computeLV();
 
 
-                    //check if return value is empty cloud --> full match --> remove element in object vector
+                    //check if transformation is different to identy matrix --> remove element in object vector
                     if (lv_result.transform_obj_to_model != Eigen::Matrix4f::Identity()) {
                         //full match reference
                         if (lv_result.model_non_matching_pts.size() == 0) {
@@ -359,6 +362,8 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
                         boost::filesystem::create_directories(LV_match_path);
                         pcl::io::savePCDFileBinary(LV_match_path + "/ref_object.pcd", *matched_ref.getObjectCloud());
                         pcl::io::savePCDFileBinary(LV_match_path + "/curr_object.pcd", *matched_curr.getObjectCloud());
+                        if (erased_co_elem)
+                            break; //we found already an association, check next current element
                     } else {
                         ro_it++;
                     }
@@ -986,7 +991,33 @@ void ChangeDetection::mergeObjectParts(std::vector<DetectedObject> &detected_obj
                         continue;
 
                     pcl::PointCloud<PointNormal>::Ptr good_pts(new pcl::PointCloud<PointNormal>);
+                    /// the detected objects is from the current frame
                     if (detected_objects[i].state_ == ObjectState::NEW && detected_objects[j].getID() == detected_objects[j].match_.object_id) {
+                        /// are the potential overlapping objects close?
+                        pcl::KdTreeFLANN<PointNormal> kdtree;
+                        kdtree.setInputCloud (detected_objects[i].getObjectCloud());
+
+                        bool is_obj_close = false;
+                        int K = 1;
+                        for (size_t p = 0; p < detected_objects[j].getObjectCloud()->size(); p++) {
+                            PointNormal &searchPoint = detected_objects[j].getObjectCloud()->points[p];
+                            if (!pcl::isFinite(searchPoint))
+                                continue;
+
+                            std::vector<int> pointIdxKNNSearch(K);
+                            std::vector<float> pointKNNSquaredDistance(K);
+
+                            if ( kdtree.nearestKSearch (searchPoint, K, pointIdxKNNSearch, pointKNNSquaredDistance) > 0 )
+                            {
+                                if (pointKNNSquaredDistance[0] < 0.02*0.02) {   //if any pair of points of the two objects is closer than 2 cm
+                                    is_obj_close = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!is_obj_close)
+                            continue;
+
                         pcl::ExtractIndices<PointNormal> extract;
                         extract.setInputCloud (detected_objects[j].getObjectCloud());
                         pcl::PointIndices::Ptr obj_ind(new pcl::PointIndices);
@@ -995,7 +1026,33 @@ void ChangeDetection::mergeObjectParts(std::vector<DetectedObject> &detected_obj
                         extract.setNegative (false);
                         extract.setKeepOrganized(false);
                         extract.filter(*good_pts);
-                    } else if (detected_objects[i].state_ == ObjectState::REMOVED && detected_objects[j].getID() == detected_objects[j].match_.model_id) {
+                    }
+                    /// the detected objects is from the reference frame
+                    else if (detected_objects[i].state_ == ObjectState::REMOVED && detected_objects[j].getID() == detected_objects[j].match_.model_id) {
+                        /// are the potential overlapping objects close?
+                        pcl::KdTreeFLANN<PointNormal> kdtree;
+                        kdtree.setInputCloud (detected_objects[i].getObjectCloud());
+
+                        bool is_obj_close = false;
+                        int K = 1;
+                        for (size_t p = 0; p < detected_objects[j].getObjectCloud()->size(); p++) {
+                            PointNormal &searchPoint = detected_objects[j].getObjectCloud()->points[p];
+                            if (!pcl::isFinite(searchPoint))
+                                continue;
+
+                            std::vector<int> pointIdxKNNSearch(K);
+                            std::vector<float> pointKNNSquaredDistance(K);
+
+                            if ( kdtree.nearestKSearch (searchPoint, K, pointIdxKNNSearch, pointKNNSquaredDistance) > 0 )
+                            {
+                                if (pointKNNSquaredDistance[0] < 0.02*0.02) {   //if any pair of points of the two objects is closer than 2 cm
+                                    is_obj_close = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!is_obj_close)
+                            continue;
                         pcl::ExtractIndices<PointNormal> extract;
                         extract.setInputCloud (detected_objects[j].getObjectCloud());
                         pcl::PointIndices::Ptr obj_ind(new pcl::PointIndices);
@@ -1010,8 +1067,8 @@ void ChangeDetection::mergeObjectParts(std::vector<DetectedObject> &detected_obj
 
                     //call the region growing method
 
-//                    pcl::io::savePCDFileBinary("/home/edith/Desktop/before_rg_j.pcd", *good_pts);
-//                    pcl::io::savePCDFileBinary("/home/edith/Desktop/before_rg_i.pcd", *detected_objects[i].getObjectCloud());
+                    pcl::io::savePCDFileBinary("/home/edith/Desktop/before_rg_j.pcd", *good_pts);
+                    pcl::io::savePCDFileBinary("/home/edith/Desktop/before_rg_i.pcd", *detected_objects[i].getObjectCloud());
 
                     pcl::PointCloud<PointNormal>::Ptr combined_object(new pcl::PointCloud<PointNormal>);
                     *combined_object += *detected_objects[i].getObjectCloud();
@@ -1022,56 +1079,49 @@ void ChangeDetection::mergeObjectParts(std::vector<DetectedObject> &detected_obj
                     std::vector<int> add_object_ind = region_growing.compute();
 
                     //nothing was added to the static/displaced object
-                    if (add_object_ind.size() == detected_objects[j].getObjectCloud()->size())
+                    if (add_object_ind.size() == good_pts->size())
                         continue;
 
-                    //if less than 100 points remain, add everything to the static/displaced object
-                    if (combined_object->size() - add_object_ind.size() < 100) {
-                        detected_objects[j].setObjectCloud(combined_object);
-                        detected_objects[i].setObjectCloud(boost::make_shared<pcl::PointCloud<PointNormal>>());
-                    }
 
-                    else {
-                        pcl::ExtractIndices<PointNormal> extract;
-                        extract.setInputCloud (combined_object);
-                        pcl::PointIndices::Ptr obj_ind(new pcl::PointIndices);
-                        obj_ind->indices = add_object_ind;
-                        extract.setIndices (obj_ind);
-                        extract.setNegative (false);
-                        extract.setKeepOrganized(false);
-                        extract.filter(*detected_objects[j].getObjectCloud());
+                    pcl::ExtractIndices<PointNormal> extract;
+                    extract.setInputCloud (combined_object);
+                    pcl::PointIndices::Ptr obj_ind(new pcl::PointIndices);
+                    obj_ind->indices = add_object_ind;
+                    extract.setIndices (obj_ind);
+                    extract.setNegative (false);
+                    extract.setKeepOrganized(false);
+                    extract.filter(*detected_objects[j].getObjectCloud());
 
-                        extract.setNegative (true);
-                        extract.setKeepOrganized(false);
-                        extract.filter(*detected_objects[i].getObjectCloud());
+                    extract.setNegative (true);
+                    extract.setKeepOrganized(false);
+                    extract.filter(*detected_objects[i].getObjectCloud());
 
-//                        if (!detected_objects[j].getObjectCloud()->empty())
-//                            pcl::io::savePCDFileBinary("/home/edith/Desktop/middle_rg_j.pcd", *detected_objects[j].getObjectCloud());
-//                        if (!detected_objects[i].getObjectCloud()->empty())
-//                            pcl::io::savePCDFileBinary("/home/edith/Desktop/middle_rg_i.pcd", *detected_objects[i].getObjectCloud());
+                    if (!detected_objects[j].getObjectCloud()->empty())
+                        pcl::io::savePCDFileBinary("/home/edith/Desktop/middle_rg_j.pcd", *detected_objects[j].getObjectCloud());
+                    if (!detected_objects[i].getObjectCloud()->empty())
+                        pcl::io::savePCDFileBinary("/home/edith/Desktop/middle_rg_i.pcd", *detected_objects[i].getObjectCloud());
 
-                        //remove very small clusters
-                        std::vector<int> small_cluster_ind;
-                        ObjectMatching::clusterOutliersBySize(detected_objects[i].getObjectCloud(), small_cluster_ind, 0.014, 100);
+                    //remove very small clusters
+                    std::vector<int> small_cluster_ind;
+                    ObjectMatching::clusterOutliersBySize(detected_objects[i].getObjectCloud(), small_cluster_ind, 0.014, 100);
 
-                        pcl::PointCloud<PointNormal>::Ptr small_cluster_cloud(new pcl::PointCloud<PointNormal>);
-                        extract.setInputCloud (detected_objects[i].getObjectCloud());
-                        obj_ind->indices = small_cluster_ind;
-                        extract.setIndices (obj_ind);
-                        extract.setNegative (false);
-                        extract.setKeepOrganized(false);
-                        extract.filter(*small_cluster_cloud);
-                        *detected_objects[j].getObjectCloud() += *small_cluster_cloud;
+                    pcl::PointCloud<PointNormal>::Ptr small_cluster_cloud(new pcl::PointCloud<PointNormal>);
+                    extract.setInputCloud (detected_objects[i].getObjectCloud());
+                    obj_ind->indices = small_cluster_ind;
+                    extract.setIndices (obj_ind);
+                    extract.setNegative (false);
+                    extract.setKeepOrganized(false);
+                    extract.filter(*small_cluster_cloud);
+                    *detected_objects[j].getObjectCloud() += *small_cluster_cloud;
 
-                        extract.setNegative (true);
-                        extract.setKeepOrganized(false);
-                        extract.filter(*detected_objects[i].getObjectCloud());
+                    extract.setNegative (true);
+                    extract.setKeepOrganized(false);
+                    extract.filter(*detected_objects[i].getObjectCloud());
 
-//                        if (!detected_objects[j].getObjectCloud()->empty())
-//                            pcl::io::savePCDFileBinary("/home/edith/Desktop/after_rg_j.pcd", *detected_objects[j].getObjectCloud());
-//                        if (!detected_objects[i].getObjectCloud()->empty())
-//                            pcl::io::savePCDFileBinary("/home/edith/Desktop/after_rg_i.pcd", *detected_objects[i].getObjectCloud());
-                    }
+                    if (!detected_objects[j].getObjectCloud()->empty())
+                        pcl::io::savePCDFileBinary("/home/edith/Desktop/after_rg_j.pcd", *detected_objects[j].getObjectCloud());
+                    if (!detected_objects[i].getObjectCloud()->empty())
+                        pcl::io::savePCDFileBinary("/home/edith/Desktop/after_rg_i.pcd", *detected_objects[i].getObjectCloud());
                 }
             }
         }
@@ -1079,10 +1129,10 @@ void ChangeDetection::mergeObjectParts(std::vector<DetectedObject> &detected_obj
 
     //remove objects that have an empty cloud now
     detected_objects.erase(std::remove_if(
-                         detected_objects.begin(),
-                         detected_objects.end(),
-                         [&](DetectedObject const & o) { return o.getObjectCloud()->size() == 0; }
-                     ), detected_objects.end());
+                               detected_objects.begin(),
+                               detected_objects.end(),
+                               [&](DetectedObject const & o) { return o.getObjectCloud()->size() == 0; }
+                           ), detected_objects.end());
 }
 
 
