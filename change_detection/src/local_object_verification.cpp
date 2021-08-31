@@ -190,24 +190,25 @@ LVResult LocalObjectVerification::computeLV() {
                 for (size_t i = 0; i < diff_ind.size(); i++)
                     curr_orig_ind.push_back(curr_nan[diff_ind[i]]);
                 result.obj_non_matching_pts = curr_orig_ind;
+
+                return result;
             }
         }
         // no correspondence found
-    } else {
-        //tranform back to orig ind
-        std::vector<int> ref_orig_ind;
-        for (size_t i = 0; i < ref_nan.size(); i++)
-            ref_orig_ind.push_back(ref_nan[i]);
-        result.model_non_matching_pts = ref_orig_ind;
-
-        //tranform back to orig ind
-        std::vector<int> curr_orig_ind;
-        for (size_t i = 0; i < curr_nan.size(); i++)
-            curr_orig_ind.push_back(curr_nan[i]);
-        result.obj_non_matching_pts = curr_orig_ind;
-
-        result.transform_obj_to_model = Eigen::Matrix4f::Identity();
     }
+    //tranform back to orig ind
+    std::vector<int> ref_orig_ind;
+    for (size_t i = 0; i < ref_nan.size(); i++)
+        ref_orig_ind.push_back(ref_nan[i]);
+    result.model_non_matching_pts = ref_orig_ind;
+
+    //tranform back to orig ind
+    std::vector<int> curr_orig_ind;
+    for (size_t i = 0; i < curr_nan.size(); i++)
+        curr_orig_ind.push_back(curr_nan[i]);
+    result.obj_non_matching_pts = curr_orig_ind;
+
+    result.transform_obj_to_model = Eigen::Matrix4f::Identity();
 
     return result;
 }

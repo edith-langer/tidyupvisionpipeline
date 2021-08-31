@@ -5,5 +5,4 @@ set(CMAKE_BUILD_TYPE Release)
 
 add_subdirectory(v4r_ppf)
 add_subdirectory(change_detection)
-
-
+add_subdirectory(evaluation)
