@@ -86,7 +86,8 @@ struct GTCloudsAndNumbers {
 int getMostFrequentNumber(std::vector<int> v);
 int remainingClusters (pcl::PointCloud<PointLabel>::Ptr cloud, float cluster_thr, int min_cluster_size, std::string path="");
 void writeSumResultsToFile(std::vector<Measurements> all_gt_results, std::vector<Measurements> all_tp_results, std::vector<Measurements> all_fp_results, std::string path);
-int extractDetectedObjects(std::vector<GTObject> gt_objects, pcl::PointCloud<PointLabel>::Ptr result_cloud);
+int extractDetectedObjects(std::vector<GTObject> gt_objects, pcl::PointCloud<PointLabel>::Ptr result_cloud, std::map<std::string, int> &gt_obj_count, std::map<std::string, int> &det_obj_count);
+void writeObjectSummaryToFile(std::map<std::string, int> & gt_obj_count, std::map<std::string, int> & det_obj_count, std::map<std::string, int> &tp_class_obj_count, std::string path);
 
 std::ostream& operator<<(std::ostream& output, Measurements const& m)
 {
@@ -205,6 +206,7 @@ int main(int argc, char* argv[])
 
 
     //----------------------------read the annotation----------------------------------
+    std::map<std::string, int> gt_obj_count;
     std::map<std::string, std::map<std::string, pcl::PointCloud<PointLabel>::Ptr> > scene_annotations_map; //e.g. ("scene2", ("mug", <cloud>))
     for (boost::filesystem::directory_iterator iter(annotation_path); iter != end_iter; ++iter) {
         if (boost::filesystem::is_directory(*iter)) {
@@ -243,8 +245,14 @@ int main(int argc, char* argv[])
                     object_cloud->height = 1;
                     object_cloud->is_dense=true;
                     std::string is_on_floor = split_result[split_result.size()-1];
-                    if (is_on_floor == "false")
+                    if (is_on_floor == "false") {
                         objName_cloud_map[object_name] = object_cloud;
+                        std::map<std::string, int>::iterator it = gt_obj_count.find(object_name);
+                        if (it == gt_obj_count.end())
+                            gt_obj_count[object_name] = 1;
+                        else
+                            gt_obj_count[object_name] += 1;
+                    }
                 }
             }
             scene_annotations_map[iter->path().filename().string()] = objName_cloud_map;
@@ -358,6 +366,7 @@ int main(int argc, char* argv[])
     //----------------------------the real evaluation happens now----------------------------------
     /// iterate over all scene comparison folders
     std::vector<Measurements> all_gt_results, all_tp_results, all_fp_results;
+    std::map<std::string, int> det_obj_count_comp, gt_obj_count_comp, tp_class_object_count;
     for (size_t i = 0; i < scenes.size(); i++) {
         const SceneCompInfo &scene_comp = scenes[i];
         const GTCloudsAndNumbers gt_cloud_numbers = scene_GTClouds_map[scene_comp.ref_scene + "-" + scene_comp.curr_scene];
@@ -412,6 +421,11 @@ int main(int argc, char* argv[])
                 if (is_obj_matched) {
                     result.nr_removed_obj++;
                     is_obj_matched = false;
+                    std::map<std::string, int>::iterator it = tp_class_object_count.find(gt_obj.name);
+                    if (it == tp_class_object_count.end())
+                        tp_class_object_count[gt_obj.name] = 1;
+                    else
+                        tp_class_object_count[gt_obj.name] += 1;
                 }
             }
             FP_results.nr_removed_obj = remainingClusters(removed_obj_cloud, cluster_thr, min_cluster_size, scene_comp.result_path+"/rem_removed.pcd");
@@ -442,6 +456,11 @@ int main(int argc, char* argv[])
                 if (is_obj_matched) {
                     result.nr_novel_obj++;
                     is_obj_matched = false;
+                    std::map<std::string, int>::iterator it = tp_class_object_count.find(gt_obj.name);
+                    if (it == tp_class_object_count.end())
+                        tp_class_object_count[gt_obj.name] = 1;
+                    else
+                        tp_class_object_count[gt_obj.name] += 1;
                 }
             }
             FP_results.nr_novel_obj = remainingClusters(novel_obj_cloud, cluster_thr, min_cluster_size, scene_comp.result_path+"/rem_novel.pcd");
@@ -532,6 +551,11 @@ int main(int argc, char* argv[])
                     result.nr_moved_obj += 2;
                     matched_moved.push_back(gt_obj.name);
                 }
+                std::map<std::string, int>::iterator it = tp_class_object_count.find(gt_obj.name);
+                if (it == tp_class_object_count.end())
+                    tp_class_object_count[gt_obj.name] = 2;
+                else
+                    tp_class_object_count[gt_obj.name] += 2;
 
                 //update the clouds and remove matched indices
                 pcl::PointIndices::Ptr c_ind(new pcl::PointIndices());
@@ -575,12 +599,12 @@ int main(int argc, char* argv[])
         *curr_result_cloud += *c_static_obj_cloud;
         *curr_result_cloud += *novel_obj_cloud;
         pcl::io::savePCDFileBinary("/home/edith/curr_cloud.pcd", *curr_result_cloud);
-        result.nr_det_obj = extractDetectedObjects(gt_cloud_numbers.curr_objects, curr_result_cloud);
+        result.nr_det_obj = extractDetectedObjects(gt_cloud_numbers.curr_objects, curr_result_cloud, gt_obj_count_comp, det_obj_count_comp);
         pcl::PointCloud<PointLabel>::Ptr ref_result_cloud(new pcl::PointCloud<PointLabel>());
         *ref_result_cloud += *r_moved_obj_cloud;
         *ref_result_cloud += *r_static_obj_cloud;
         *ref_result_cloud += *removed_obj_cloud;
-        result.nr_det_obj += extractDetectedObjects(gt_cloud_numbers.ref_objects, ref_result_cloud);
+        result.nr_det_obj += extractDetectedObjects(gt_cloud_numbers.ref_objects, ref_result_cloud, gt_obj_count_comp, det_obj_count_comp);
 
         std::cout << scene_comp.ref_scene + "-" + scene_comp.curr_scene << std::endl;
         std::cout << "GT numbers \n" << gt_cloud_numbers.m;
@@ -601,9 +625,27 @@ int main(int argc, char* argv[])
 
     }
 
+    std::cout << "Overview of objects used in the scenes" << std::endl; //sum of objects used in scene2-scene6
+    for (const auto obj_count : gt_obj_count) {
+        std::cout << obj_count.first << ": " << obj_count.second << std::endl;
+    }
 
+    std::cout << "Number of GT objects using all possible scene comparisons" << std::endl; //sum of objects used in scene2-scene6
+    for (const auto obj_count : gt_obj_count_comp) {
+        std::cout << obj_count.first << ": " << obj_count.second << std::endl;
+    }
 
-    writeSumResultsToFile(all_gt_results, all_tp_results, all_fp_results, result_path + "/results.txt");
+    std::cout << "Number of detected objects using all possible scene comparisons" << std::endl; //sum of objects used in scene2-scene6
+    for (const auto obj_count : det_obj_count_comp) {
+        std::cout << obj_count.first << ": " << obj_count.second << std::endl;
+    }
+
+    std::string result_file = result_path +  "/results.txt";
+    //clear the file content
+    std::ofstream result_stream (result_file);
+    result_stream.close();
+    writeSumResultsToFile(all_gt_results, all_tp_results, all_fp_results, result_file);
+    writeObjectSummaryToFile(gt_obj_count_comp, det_obj_count_comp, tp_class_object_count, result_file);
 
 }
 
@@ -654,7 +696,8 @@ int remainingClusters (pcl::PointCloud<PointLabel>::Ptr cloud, float cluster_thr
 }
 
 //an object counts as detected if > 50 % of it were detected
-int extractDetectedObjects(std::vector<GTObject> gt_objects, pcl::PointCloud<PointLabel>::Ptr result_cloud) {
+int extractDetectedObjects(std::vector<GTObject> gt_objects, pcl::PointCloud<PointLabel>::Ptr result_cloud,
+                           std::map<std::string, int> & gt_obj_count, std::map<std::string, int> & det_obj_count) {
     int nr_det_obj = 0;
     pcl::search::KdTree<PointLabel>::Ptr tree (new pcl::search::KdTree<PointLabel>);
     tree->setInputCloud (result_cloud);
@@ -672,10 +715,53 @@ int extractDetectedObjects(std::vector<GTObject> gt_objects, pcl::PointCloud<Poi
 
         std::sort(overlapping_ind.begin(), overlapping_ind.end());
         overlapping_ind.erase(unique(overlapping_ind.begin(), overlapping_ind.end()), overlapping_ind.end());
-        if (overlapping_ind.size() > 0.5 * gt_cloud->size())
+        if (overlapping_ind.size() > 0.5 * gt_cloud->size()) {
             nr_det_obj++;
+            std::map<std::string, int>::iterator it = det_obj_count.find(gt_obj.name);
+            if (it == det_obj_count.end())
+                det_obj_count[gt_obj.name] = 1;
+            else
+                det_obj_count[gt_obj.name] += 1;
+        }
+        std::map<std::string, int>::iterator it = gt_obj_count.find(gt_obj.name);
+        if (it == gt_obj_count.end())
+            gt_obj_count[gt_obj.name] = 1;
+        else
+            gt_obj_count[gt_obj.name] += 1;
     }
     return nr_det_obj;
+}
+
+void writeObjectSummaryToFile(std::map<std::string, int> & gt_obj_count, std::map<std::string, int> & det_obj_count, std::map<std::string, int> & tp_class_obj_count, std::string path) {
+    int count_gt_obj = 0;
+    int count_det_obj = 0;
+    int count_tp_class_obj = 0;
+    std::ofstream result_file;
+    result_file.open (path, std::ofstream::out | std::ofstream::app);
+    result_file << "\n";
+    for (const auto obj_count : gt_obj_count) {
+        const std::string &obj_name = obj_count.first;
+        result_file << obj_count.first << ": " << obj_count.second;
+        count_gt_obj += obj_count.second;
+        std::map<std::string, int>::iterator det_it = det_obj_count.find(obj_name);
+        if (det_it != det_obj_count.end()) {
+            result_file << "/" << det_it->second;
+            count_det_obj += det_it->second;
+        } else {
+            result_file << "/" << 0;
+        }
+        det_it = tp_class_obj_count.find(obj_name);
+        if (det_it != tp_class_obj_count.end()) {
+            result_file << "/" << det_it->second;
+            count_tp_class_obj += det_it->second;
+        } else {
+            result_file << "/" << 0;
+        }
+        result_file << "\n";
+    }
+    result_file << "#objects in scene: " << count_gt_obj << "\n";
+    result_file << "#detected objects: " << count_det_obj << "\n";
+    result_file << "#objects correctly classified: " << count_tp_class_obj << "\n";
 }
 
 void writeSumResultsToFile(std::vector<Measurements> all_gt_results, std::vector<Measurements> all_tp_results, std::vector<Measurements> all_fp_results,
@@ -704,7 +790,7 @@ void writeSumResultsToFile(std::vector<Measurements> all_gt_results, std::vector
     }
 
     std::ofstream result_file;
-    result_file.open (path);
+    result_file.open (path, std::ofstream::out | std::ofstream::app);
     result_file << "Ground Truth \n" << gt_sum;
     result_file << "\nTrue Positives \n" << tp_sum;
     result_file << "\nFalse Positives \n" << fp_sum;
