@@ -59,6 +59,7 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
     //add some margin because hull points were computed from a full room reconstruction that may include drift
     float margin = 0.2;
     pcl::PointCloud<PointNormal>::Ptr cropped_cloud(new pcl::PointCloud<PointNormal>);
+    pcl::PointCloud<PointNormal>::Ptr cropped_cloud_for_plane(new pcl::PointCloud<PointNormal>);
     pcl::PassThrough<PointNormal> pass;
     pass.setInputCloud(orig_cloud_);
     pass.setFilterFieldName("x");
@@ -68,18 +69,30 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
     pass.setInputCloud(cropped_cloud);
     pass.setFilterFieldName("y");
     pass.setFilterLimits(min_hull_pt.y - margin, max_hull_pt.y + margin);
-    pass.setKeepOrganized(true);
     pass.filter(*cropped_cloud);
+    pass.setInputCloud(cropped_cloud);
     pass.setFilterFieldName("z");
-    pass.setFilterLimits(min_hull_pt.z - margin, max_hull_pt.z + margin);
-    pass.setKeepOrganized(true);
-    pass.filter(*cropped_cloud);
+    pass.setFilterLimits(min_hull_pt.z - 0.1, max_hull_pt.z + 0.1);
+    pass.filter(*cropped_cloud_for_plane); //we want to restrict the search space for the plane, but cropped_cloud is used later for extracting the objects and would cut them off
 
-    if (cropped_cloud->empty()) {
+    if (cropped_cloud_for_plane->empty()) {
         return PlaneWithObjInd(); //return empty object
     }
+    pcl::io::savePCDFileBinary(result_path_ + "/cropped_cloud.pcd", *cropped_cloud_for_plane);
 
-    pcl::io::savePCDFileBinary(result_path_ + "/cropped_cloud.pcd", *cropped_cloud);
+    //filter normals
+    pcl::PointCloud<PointNormal>::Ptr cropped_cloud_filtered(new pcl::PointCloud<PointNormal>);
+    pcl::ConditionAnd<PointNormal>::Ptr range_cond (new pcl::ConditionAnd<PointNormal> ());
+    range_cond->addComparison (pcl::FieldComparison<PointNormal>::ConstPtr (new pcl::FieldComparison<PointNormal> ("normal_x", pcl::ComparisonOps::GT, -0.25))); //~15 deg
+    range_cond->addComparison (pcl::FieldComparison<PointNormal>::ConstPtr (new pcl::FieldComparison<PointNormal> ("normal_x", pcl::ComparisonOps::LT, 0.25)));
+    range_cond->addComparison (pcl::FieldComparison<PointNormal>::ConstPtr (new pcl::FieldComparison<PointNormal> ("normal_y", pcl::ComparisonOps::GT, -0.25)));
+    range_cond->addComparison (pcl::FieldComparison<PointNormal>::ConstPtr (new pcl::FieldComparison<PointNormal> ("normal_y", pcl::ComparisonOps::LT, 0.25)));
+    // build the filter
+    pcl::ConditionalRemoval<PointNormal> condrem;
+    condrem.setCondition (range_cond);
+    condrem.setInputCloud(cropped_cloud_for_plane);
+    condrem.setKeepOrganized(true);
+    condrem.filter (*cropped_cloud_filtered);
 
     //cluster the cropped cloud and keep only the biggest cluster
     pcl::EuclideanClusterExtraction<PointNormal> ec_cropped_cloud;
@@ -87,7 +100,7 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
     ec_cropped_cloud.setClusterTolerance (0.05);
     ec_cropped_cloud.setMinClusterSize (5);
     ec_cropped_cloud.setMaxClusterSize (std::numeric_limits<int>::max());
-    ec_cropped_cloud.setInputCloud (cropped_cloud);
+    ec_cropped_cloud.setInputCloud (cropped_cloud_filtered);
     ec_cropped_cloud.extract (clusters_cropped_cloud);
 
     if (clusters_cropped_cloud.size() == 0) {
@@ -95,35 +108,20 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
         return PlaneWithObjInd(); //return empty object
     }
 
+    pcl::PointCloud<PointNormal>::Ptr biggest_cluster_plane (new pcl::PointCloud<PointNormal>);
     pcl::ExtractIndices<PointNormal> extract_biggest_cluster;
-    extract_biggest_cluster.setInputCloud (cropped_cloud);
+    extract_biggest_cluster.setInputCloud (cropped_cloud_for_plane);
     extract_biggest_cluster.setIndices (boost::make_shared<pcl::PointIndices>(clusters_cropped_cloud[0])); //the cluster result should be sorted, first element is the biggest
     extract_biggest_cluster.setNegative (false);
     extract_biggest_cluster.setKeepOrganized(true);
-    extract_biggest_cluster.filter(*cropped_cloud);
+    extract_biggest_cluster.filter(*biggest_cluster_plane);
+    pcl::io::savePCDFileBinary(result_path_ + "/biggest_cluster.pcd", *biggest_cluster_plane);
 
-    pcl::io::savePCDFileBinary(result_path_ + "/biggest_cluster.pcd", *cropped_cloud);
-
-
-    //we know roughly where the plane is and keep all points within a distance of 15 cm
-    pcl::SampleConsensusModelPlane<PointNormal>::Ptr dit (new pcl::SampleConsensusModelPlane<PointNormal> (cropped_cloud));
-    std::vector<int> main_plane_inliers_vec;
-    dit -> selectWithinDistance (main_plane_coeffs_, 0.15, main_plane_inliers_vec);
-    pcl::PointIndices::Ptr main_plane_inliers (new pcl::PointIndices ());
-    main_plane_inliers->indices = main_plane_inliers_vec;
-    pcl::PointCloud<PointNormal>::Ptr rough_plane_cloud (new pcl::PointCloud<PointNormal>);
-    pcl::ExtractIndices<PointNormal> extract;
-    extract.setInputCloud (cropped_cloud);
-    extract.setIndices (main_plane_inliers);
-    extract.setNegative (false);
-    extract.setKeepOrganized(true);    //if we keep it organized, RANSAC does not finde a plane because of all the NANs
-    extract.filter(*rough_plane_cloud);
-    pcl::io::savePCDFileBinary(result_path_ + "/rough_plane_cloud.pcd", *rough_plane_cloud);
 
     //remove NANs before applying RANSAC
     std::vector<int> nan_ind;
     pcl::PointCloud<PointNormal>::Ptr rough_plane_no_nans_cloud (new pcl::PointCloud<PointNormal>);
-    pcl::removeNaNFromPointCloud(*rough_plane_cloud, *rough_plane_no_nans_cloud, nan_ind);
+    pcl::removeNaNFromPointCloud(*biggest_cluster_plane, *rough_plane_no_nans_cloud, nan_ind);
 
     // Create the segmentation object
     pcl::SACSegmentation<PointNormal> seg;
@@ -135,6 +133,7 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
     seg.setAxis(Eigen::Vector3f(0,0,1));
     seg.setEpsAngle(5.0f * (M_PI/180.0f)); //without setting an angle, the axis is ignored and all planes get segmented
     pcl::ModelCoefficients::Ptr new_plane_coefficients (new pcl::ModelCoefficients);
+    pcl::PointIndices::Ptr main_plane_inliers (new pcl::PointIndices ());
     seg.setInputCloud(rough_plane_no_nans_cloud);
     seg.segment (*main_plane_inliers, *new_plane_coefficients);
 
@@ -167,6 +166,7 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
     pcl::PointCloud<PointNormal>::Ptr remaining_cloud(new pcl::PointCloud<PointNormal>);
 
     //Extract plane
+    pcl::ExtractIndices<PointNormal> extract;
     extract.setInputCloud (cropped_cloud);
     extract.setIndices (main_plane.plane_ind);
     extract.setNegative (true);
@@ -184,13 +184,6 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
     //Check if the plane is a good plane by removing normals not pointing in the z-direction
     // build the condition
     pcl::PointCloud<PointNormal>::Ptr cloud_plane_filtered(new pcl::PointCloud<PointNormal>);
-    pcl::ConditionAnd<PointNormal>::Ptr range_cond (new pcl::ConditionAnd<PointNormal> ());
-    range_cond->addComparison (pcl::FieldComparison<PointNormal>::ConstPtr (new pcl::FieldComparison<PointNormal> ("normal_x", pcl::ComparisonOps::GT, -0.25))); //~15 deg
-    range_cond->addComparison (pcl::FieldComparison<PointNormal>::ConstPtr (new pcl::FieldComparison<PointNormal> ("normal_x", pcl::ComparisonOps::LT, 0.25)));
-    range_cond->addComparison (pcl::FieldComparison<PointNormal>::ConstPtr (new pcl::FieldComparison<PointNormal> ("normal_y", pcl::ComparisonOps::GT, -0.25)));
-    range_cond->addComparison (pcl::FieldComparison<PointNormal>::ConstPtr (new pcl::FieldComparison<PointNormal> ("normal_y", pcl::ComparisonOps::LT, 0.25)));
-    // build the filter
-    pcl::ConditionalRemoval<PointNormal> condrem;
     condrem.setCondition (range_cond);
     condrem.setInputCloud(plane_cloud);
     condrem.setKeepOrganized(true);
@@ -265,7 +258,7 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
     ex_prism.setViewPoint(0,0,5); //this is used to flip the plane normal towards the viewpoint, if necessary
     ex_prism.setInputCloud (cropped_cloud);
     ex_prism.setInputPlanarHull (cloud_hull);
-    ex_prism.setHeightLimits(0.02, 0.30);
+    ex_prism.setHeightLimits(0.02, 0.3);
     pcl::PointIndices::Ptr object_indices (new pcl::PointIndices);
     ex_prism.segment (*object_indices);
 
@@ -304,6 +297,9 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
             plane_object_result.plane = supp_plane;
 
             return plane_object_result;
+        } else {
+            std::cerr << "No objects found" << std::endl;
+            return PlaneWithObjInd();
         }
     } else {
         std::cerr << "No objects found" << std::endl;
