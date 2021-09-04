@@ -22,7 +22,8 @@
 
 
 ExtractObjectsFromPlanes::ExtractObjectsFromPlanes(pcl::PointCloud<PointNormal>::Ptr cloud, Eigen::Vector4f main_plane_coeffs,
-                                                   pcl::PointCloud<pcl::PointXYZ>::Ptr convex_hull_pts, std::string output_path) {
+                                                   pcl::PointCloud<pcl::PointXYZ>::Ptr convex_hull_pts,
+                                                   std::string output_path) {
     orig_cloud_ = cloud;
     main_plane_coeffs_ = main_plane_coeffs;
     convex_hull_pts_ = convex_hull_pts;
@@ -35,21 +36,24 @@ void ExtractObjectsFromPlanes::setResultPath(std::string path) {
     result_path_ = path;
 }
 
-PlaneWithObjInd ExtractObjectsFromPlanes::computeObjectsOnPlanes() {
+PlaneWithObjInd ExtractObjectsFromPlanes::computeObjectsOnPlanes(pcl::PointCloud<PointNormal>::Ptr checked_plane_points_cloud) {
     std::string plane_result_path = result_path_ + "/plane_results/";
     boost::filesystem::create_directories(plane_result_path);
     std::cout << "Extract objects supported by a plane " << std::endl;
-    PlaneWithObjInd plane_objects = extractObjectInd();
+    PlaneWithObjInd plane_objects = extractObjectInd(checked_plane_points_cloud);
 
     return plane_objects;
 }
 
-PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
+PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd(pcl::PointCloud<PointNormal>::Ptr checked_plane_points_cloud) {
 
     //plane coeffs from voxblox with low resolution are probably not good enough to extract the plane
     //crop the input cloud and run ransac to detect it
     //we get convex hull points for each plane from the DB, can we use cropHull from pcl?
     // get min and max point from convex hull (should be 2D), crop in x and y direction with some margin, run ransac again
+
+    PointNormal nan_point;
+    nan_point.x = nan_point.y = nan_point.z = std::numeric_limits<float>::quiet_NaN();
 
     //---------------------------setup the main plane------------------------------------------------
     //crop cloud according to the convex hull points, find min and max values in x and y direction
@@ -57,7 +61,7 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
     pcl::getMinMax3D(*convex_hull_pts_, min_hull_pt, max_hull_pt);
 
     //add some margin because hull points were computed from a full room reconstruction that may include drift
-    float margin = 0.2;
+    float margin = 0.5;
     pcl::PointCloud<PointNormal>::Ptr cropped_cloud(new pcl::PointCloud<PointNormal>);
     pcl::PointCloud<PointNormal>::Ptr cropped_cloud_for_plane(new pcl::PointCloud<PointNormal>);
     pcl::PassThrough<PointNormal> pass;
@@ -94,34 +98,64 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
     condrem.setKeepOrganized(true);
     condrem.filter (*cropped_cloud_filtered);
 
-    //cluster the cropped cloud and keep only the biggest cluster
-    pcl::EuclideanClusterExtraction<PointNormal> ec_cropped_cloud;
-    std::vector<pcl::PointIndices> clusters_cropped_cloud;
-    ec_cropped_cloud.setClusterTolerance (0.05);
-    ec_cropped_cloud.setMinClusterSize (5);
-    ec_cropped_cloud.setMaxClusterSize (std::numeric_limits<int>::max());
-    ec_cropped_cloud.setInputCloud (cropped_cloud_filtered);
-    ec_cropped_cloud.extract (clusters_cropped_cloud);
 
-    if (clusters_cropped_cloud.size() == 0) {
+    if (cropped_cloud_filtered->size() == 0) {
         std::cerr << "Not enough points left after cropping the input plane cloud " << std::endl;
         return PlaneWithObjInd(); //return empty object
     }
 
-    pcl::PointCloud<PointNormal>::Ptr biggest_cluster_plane (new pcl::PointCloud<PointNormal>);
-    pcl::ExtractIndices<PointNormal> extract_biggest_cluster;
-    extract_biggest_cluster.setInputCloud (cropped_cloud_for_plane);
-    extract_biggest_cluster.setIndices (boost::make_shared<pcl::PointIndices>(clusters_cropped_cloud[0])); //the cluster result should be sorted, first element is the biggest
-    extract_biggest_cluster.setNegative (false);
-    extract_biggest_cluster.setKeepOrganized(true);
-    extract_biggest_cluster.filter(*biggest_cluster_plane);
-    pcl::io::savePCDFileBinary(result_path_ + "/biggest_cluster.pcd", *biggest_cluster_plane);
+    //    pcl::PointCloud<PointNormal>::Ptr biggest_cluster_plane (new pcl::PointCloud<PointNormal>);
+    //    pcl::ExtractIndices<PointNormal> extract_biggest_cluster;
+    //    extract_biggest_cluster.setInputCloud (cropped_cloud_for_plane);
+    //    extract_biggest_cluster.setIndices (boost::make_shared<pcl::PointIndices>(clusters_cropped_cloud[0])); //the cluster result should be sorted, first element is the biggest
+    //    extract_biggest_cluster.setNegative (false);
+    //    extract_biggest_cluster.setKeepOrganized(true);
+    //    extract_biggest_cluster.filter(*biggest_cluster_plane);
+    //    pcl::io::savePCDFileBinary(result_path_ + "/biggest_cluster.pcd", *biggest_cluster_plane);
 
+    //set plane points to nan that were already used before
+    if (!checked_plane_points_cloud->empty()) {
+        pcl::PointCloud<PointNormal>::Ptr checked_plane_points_cloud_cropped(new pcl::PointCloud<PointNormal>);
+        pass.setInputCloud(checked_plane_points_cloud);
+        pass.setFilterFieldName("x");
+        pass.setFilterLimits(min_hull_pt.x - margin, max_hull_pt.x + margin);
+        pass.setKeepOrganized(false);
+        pass.filter(*checked_plane_points_cloud_cropped);
+        pass.setInputCloud(checked_plane_points_cloud_cropped);
+        pass.setFilterFieldName("y");
+        pass.setFilterLimits(min_hull_pt.y - margin, max_hull_pt.y + margin);
+        pass.filter(*checked_plane_points_cloud_cropped);
+        pass.setInputCloud(checked_plane_points_cloud_cropped);
+        pass.setFilterFieldName("z");
+        pass.setFilterLimits(min_hull_pt.z - 0.1, max_hull_pt.z + 0.1);
+        pass.filter(*checked_plane_points_cloud_cropped);
+        if (!checked_plane_points_cloud_cropped->empty()) {
+            pcl::KdTreeFLANN<PointNormal> kdtree;
+            kdtree.setInputCloud (checked_plane_points_cloud_cropped);
+            std::vector<int> pointIdxSearch;
+            std::vector<float> pointSquaredDistance;
+            for (size_t i = 0; i < cropped_cloud_filtered->size(); i++) {
+                PointNormal &search_point = cropped_cloud_filtered->points[i];
+                if (pcl::isFinite(search_point)) {
+                    if ( kdtree.radiusSearch (search_point, 0.05, pointIdxSearch, pointSquaredDistance) > 0 )
+                    {
+                        if (pointIdxSearch.size() > 0) {   //point was already used as plane point
+                            search_point = nan_point;
+                        }
+                    }
+                }
+            }
+        }
+        pcl::io::savePCDFileBinary(result_path_ + "/previously_used_plane_points.pcd", *checked_plane_points_cloud);
+    }
+
+
+    pcl::io::savePCDFileBinary(result_path_ + "/potential_plane.pcd", *cropped_cloud_filtered);
 
     //remove NANs before applying RANSAC
     std::vector<int> nan_ind;
     pcl::PointCloud<PointNormal>::Ptr rough_plane_no_nans_cloud (new pcl::PointCloud<PointNormal>);
-    pcl::removeNaNFromPointCloud(*biggest_cluster_plane, *rough_plane_no_nans_cloud, nan_ind);
+    pcl::removeNaNFromPointCloud(*cropped_cloud_filtered, *rough_plane_no_nans_cloud, nan_ind);
 
     // Create the segmentation object
     pcl::SACSegmentation<PointNormal> seg;
@@ -156,11 +190,6 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
 
     //-----------------------------------------------------------------------------------------------
 
-    //---------------------------extract further planes---------------------------------------------
-    //remove main plane points first
-    //hor_planes_ = extractHorPlanes(cloud_cluster);
-
-
 
     pcl::PointCloud<PointNormal>::Ptr plane_cloud(new pcl::PointCloud<PointNormal>);
     pcl::PointCloud<PointNormal>::Ptr remaining_cloud(new pcl::PointCloud<PointNormal>);
@@ -169,17 +198,21 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
     pcl::ExtractIndices<PointNormal> extract;
     extract.setInputCloud (cropped_cloud);
     extract.setIndices (main_plane.plane_ind);
-    extract.setNegative (true);
-    extract.setKeepOrganized(true);
-    extract.filter (*remaining_cloud);
-    pcl::io::savePCDFileBinary(result_path_ + "/remaining_points.pcd", *remaining_cloud);
-
-    extract.setInputCloud (cropped_cloud);
-    extract.setIndices (main_plane.plane_ind);
     extract.setNegative (false);
     extract.setKeepOrganized(true);
     extract.filter (*plane_cloud);
     pcl::io::savePCDFileBinary(result_path_ + "/extracted_plane.pcd", *plane_cloud);
+
+    extract.setInputCloud (cropped_cloud);
+    extract.setIndices (main_plane.plane_ind);
+    extract.setNegative (true);
+    extract.setKeepOrganized(true);
+    extract.filter (*remaining_cloud);
+    if (remaining_cloud->empty())
+        return PlaneWithObjInd(); //return empty object
+    pcl::io::savePCDFileBinary(result_path_ + "/remaining_points.pcd", *remaining_cloud);
+
+
 
     //Check if the plane is a good plane by removing normals not pointing in the z-direction
     // build the condition
@@ -252,13 +285,15 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
     std::cout << "Convex hull has: " << cloud_hull->points.size () << " data points." << std::endl;
     pcl::io::savePCDFileBinary(result_path_ + "/convex_hull.pcd", *cloud_hull);
 
+    shrinkConvexHull(cloud_hull, 0.02);
+    pcl::io::savePCDFileBinary(result_path_ + "/convex_hull_shrinked.pcd", *cloud_hull);
 
     // segment those points that are in the polygonal prism
     pcl::ExtractPolygonalPrismData<PointNormal> ex_prism;
     ex_prism.setViewPoint(0,0,5); //this is used to flip the plane normal towards the viewpoint, if necessary
     ex_prism.setInputCloud (cropped_cloud);
     ex_prism.setInputPlanarHull (cloud_hull);
-    ex_prism.setHeightLimits(0.02, 0.3);
+    ex_prism.setHeightLimits(0.01, 0.3);
     pcl::PointIndices::Ptr object_indices (new pcl::PointIndices);
     ex_prism.segment (*object_indices);
 
@@ -271,6 +306,43 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
         extract.setKeepOrganized(true);
         extract.filter(*objects);
         pcl::io::savePCDFileBinary(result_path_ + "/objects.pcd", *objects);
+
+        //remove plane points by region growing
+        pcl::PointCloud<PointNormal>::Ptr plane_obj_combined (new pcl::PointCloud<PointNormal>(objects->width, objects->height, nan_point));
+        for (size_t i = 0; i < object_indices->indices.size(); i++)
+            plane_obj_combined->points[object_indices->indices[i]] = objects->points[object_indices->indices[i]];
+        for (size_t i = 0; i < filtered_plane_ind->indices.size(); i++)
+            plane_obj_combined->points[filtered_plane_ind->indices[i]] = cloud_plane_filtered->points[filtered_plane_ind->indices[i]];
+
+        pcl::PointCloud<pcl::Normal>::Ptr scene_normals(new pcl::PointCloud<pcl::Normal>);
+        pcl::copyPointCloud(*plane_obj_combined, *scene_normals);
+        RegionGrowing<PointNormal, PointNormal> region_growing(plane_obj_combined, cloud_plane_filtered, scene_normals, false, 25.0, 20);
+        std::vector<int> all_plane_points = region_growing.compute();
+        pcl::PointIndices::Ptr plane_ind (new pcl::PointIndices);
+        plane_ind->indices = all_plane_points;
+        extract.setInputCloud(plane_obj_combined);
+        extract.setNegative(true);
+        extract.setIndices(plane_ind);
+        extract.setKeepOrganized(true);
+        extract.filter(*objects);
+        extract.setNegative(false);
+        extract.filter(*plane_cloud);
+        pcl::io::savePCDFileBinary(result_path_ + "/objects_wo_plane_pts.pcd", *objects);
+        //remove all_plane_points that are in object_indices
+        std::sort(all_plane_points.begin(), all_plane_points.end());
+        std::sort(object_indices->indices.begin(), object_indices->indices.end());
+        std::vector<int> diff;
+        std::set_difference(object_indices->indices.begin(), object_indices->indices.end(), all_plane_points.begin(), all_plane_points.end(),
+                            std::inserter(diff, diff.begin()));
+        object_indices->indices = diff;
+
+        //add plane cloud to the checked plane points
+        *checked_plane_points_cloud += *plane_cloud;
+
+        if (object_indices->indices.size() == 0) {
+            std::cerr << "No objects found" << std::endl;
+            return PlaneWithObjInd();
+        }
 
         //check if objects are flying
         std::cout << "Object indices size before filtering " << object_indices->indices.size();
@@ -287,8 +359,17 @@ PlaneWithObjInd ExtractObjectsFromPlanes::extractObjectInd() {
             extract.filter(*objects);
             pcl::io::savePCDFileBinary(result_path_ + "/objects_filtered.pcd", *objects);
 
+            pcl::PointCloud<PointNormal>::Ptr plane(new pcl::PointCloud<PointNormal>);
+            extract.setInputCloud(cropped_cloud);
+            extract.setNegative(false);
+            extract.setIndices(plane_ind);
+            extract.setKeepOrganized(true);
+            extract.filter(*plane);
+            pcl::io::savePCDFileBinary(result_path_ + "/plane.pcd", *plane);
+
+
             PlaneStruct supp_plane;
-            supp_plane.plane_ind = boost::make_shared<pcl::PointIndices>(*(main_plane.plane_ind));
+            supp_plane.plane_ind = boost::make_shared<pcl::PointIndices>(*(plane_ind));
             supp_plane.avg_z =  main_plane.avg_z;
             supp_plane.coeffs = boost::make_shared<pcl::ModelCoefficients>(*(main_plane.coeffs));
 
@@ -362,3 +443,21 @@ void ExtractObjectsFromPlanes::filter_flying_objects(pcl::PointCloud<PointNormal
                                       [&](int x){return find(std::begin(ind_to_be_removed),std::end(ind_to_be_removed),x)!=std::end(ind_to_be_removed);}), std::end(ind->indices) );
 }
 
+
+
+void ExtractObjectsFromPlanes::shrinkConvexHull(pcl::PointCloud<PointNormal>::Ptr hull_cloud, float distance) {
+    Eigen::Vector4f centroid4f; //last element is 1
+    pcl::compute3DCentroid(*hull_cloud, centroid4f);
+    Eigen::Vector3f centroid3f; centroid3f << centroid4f[0], centroid4f[1], centroid4f[2];
+
+    for (size_t i = 0; i < hull_cloud->size(); i++) {
+        Eigen::Vector3f h_pt_vec = hull_cloud->points[i].getVector3fMap();
+        Eigen::Vector3f subtract = centroid3f - h_pt_vec;
+        subtract.normalize();
+
+        //move the point a little to the center
+        hull_cloud->points[i].x = hull_cloud->points[i].x + subtract[0]*distance;
+        hull_cloud->points[i].y = hull_cloud->points[i].y + subtract[1]*distance;
+        hull_cloud->points[i].z = hull_cloud->points[i].z + subtract[2]*distance;
+    }
+}
