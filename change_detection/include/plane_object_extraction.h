@@ -22,6 +22,9 @@
 #include <pcl/features/normal_3d.h>
 #include <pcl/filters/conditional_removal.h>
 #include <pcl/search/impl/search.hpp>
+#include <pcl/common/centroid.h>
+
+#include "region_growing.h"
 
 typedef pcl::PointXYZRGBNormal PointNormal;
 typedef pcl::PointXYZRGB PointRGB;
@@ -57,12 +60,13 @@ struct PlaneWithObjInd {
 
 class ExtractObjectsFromPlanes {
 public:
-    ExtractObjectsFromPlanes(pcl::PointCloud<PointNormal>::Ptr cloud, Eigen::Vector4f main_plane_coeffs, pcl::PointCloud<pcl::PointXYZ>::Ptr convex_hull_pts, std::string output_path="");
+    ExtractObjectsFromPlanes(pcl::PointCloud<PointNormal>::Ptr cloud, Eigen::Vector4f main_plane_coeffs, pcl::PointCloud<pcl::PointXYZ>::Ptr convex_hull_pts,
+                             std::string output_path="");
     ~ExtractObjectsFromPlanes();
 
     void setResultPath(std::string path);
 
-    PlaneWithObjInd computeObjectsOnPlanes(); //this method returns potential object (points) that correspond to new or disappeard objects supported by a plane
+    std::vector<PlaneWithObjInd> computeObjectsOnPlanes(pcl::PointCloud<PointNormal>::Ptr checked_plane_points_cloud); //this method returns potential object (points) that correspond to new or disappeard objects supported by a plane
 
 
 private:
@@ -72,8 +76,10 @@ private:
     std::string result_path_;
     std::vector<PlaneStruct> hor_planes_;
 
-    PlaneWithObjInd extractObjectInd();
+    std::vector<PlaneWithObjInd> extractObjectInd(pcl::PointCloud<PointNormal>::Ptr checked_plane_points_cloud);
     void filter_flying_objects(pcl::PointCloud<PointNormal>::Ptr orig_cloud_, pcl::PointIndices::Ptr ind, pcl::PointCloud<PointNormal>::Ptr plane);
+    pcl::PointIndices::Ptr findCorrespondingPlane(pcl::PointCloud<PointNormal>::Ptr cloud, std::vector<pcl::PointIndices> clusters);
+    void shrinkConvexHull(pcl::PointCloud<PointNormal>::Ptr hull_cloud, float distance);
 };
 
 #endif //PLANE_OBJECT_EXTRACTION_H
