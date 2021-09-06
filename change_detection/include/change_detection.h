@@ -33,6 +33,8 @@
 #include "plane_object_extraction.h"
 #include "color_histogram.h"
 
+#include "settings.h"
+
 typedef pcl::PointXYZRGBNormal PointNormal;
 typedef pcl::PointXYZRGBL PointLabel;
 
@@ -40,12 +42,15 @@ typedef pcl::PointXYZRGBL PointLabel;
 class ChangeDetection
 {
 public:
-    ChangeDetection(std::string ppf_config_path) : ppf_config_path_(ppf_config_path) {}
+    ChangeDetection(std::string ppf_config_path) : ppf_config_path_(ppf_config_path) {
+        curr_checked_plane_point_cloud_.reset(new pcl::PointCloud<PointNormal>);
+        ref_checked_plane_point_cloud_.reset(new pcl::PointCloud<PointNormal>);
+    }
 
     void init(pcl::PointCloud<PointNormal>::Ptr ref_cloud, pcl::PointCloud<PointNormal>::Ptr curr_cloud,
               const Eigen::Vector4f &ref_plane_coeffs, const Eigen::Vector4f &curr_plane_coeffs,
               pcl::PointCloud<pcl::PointXYZ>::Ptr ref_convex_hull_pts, pcl::PointCloud<pcl::PointXYZ>::Ptr curr_convex_hull_pts,
-              std::string ppf_model_path, std::string output_path, bool perform_LV_matching = true);
+              std::string ppf_model_path, std::string output_path, std::string merge_object_parts_folder, bool perform_LV_matching = true);
 
     void setOutputPath (std::string output_path) {
         output_path_ = output_path;
@@ -61,13 +66,14 @@ public:
 
     void compute(std::vector<DetectedObject> &ref_result, std::vector<DetectedObject> &curr_result);
     static pcl::PointCloud<PointNormal>::Ptr downsampleCloud(pcl::PointCloud<PointNormal>::Ptr input, double leafSize);
-    static void mergeObjectParts(std::vector<DetectedObject> &detected_objects);
+    static void mergeObjectParts(std::vector<DetectedObject> &detected_objects, std::string merge_object_parts_folder);
 
 private:
     //std::string object_store_path_; //the model objects and their ppf model get stored here --> for now we store everything in output path
     std::string ppf_config_path_; //the config file that stores the parrameters for PPF
     std::string output_path_; //all debugging things will get stored there (+model objects and their ppf model)
     std::string ppf_model_path_;
+    std::string merge_object_parts_path_;
 
     std::vector<PlaneWithObjInd> potential_objects_;
     pcl::PointCloud<PointNormal>::Ptr ref_cloud_;
@@ -80,8 +86,10 @@ private:
 
     bool do_LV_before_matching_;
 
+    pcl::PointCloud<PointNormal>::Ptr curr_checked_plane_point_cloud_;
+    pcl::PointCloud<PointNormal>::Ptr ref_checked_plane_point_cloud_;
 
-    void refineNormals(pcl::PointCloud<PointNormal>::Ptr object_cloud);
+    static void refineNormals(pcl::PointCloud<PointNormal>::Ptr object_cloud);
     void upsampleObjectsAndPlanes(pcl::PointCloud<PointNormal>::Ptr orig_cloud, pcl::PointCloud<PointNormal>::Ptr ds_cloud,
                                   std::vector<PlaneWithObjInd> &objects, double leaf_size, std::string res_path);
     std::tuple<pcl::PointCloud<PointNormal>::Ptr, std::vector<int> > upsampleObjects(pcl::octree::OctreePointCloudSearch<PointNormal>::Ptr octree, pcl::PointCloud<PointNormal>::Ptr orig_input_cloud,
@@ -91,16 +99,16 @@ private:
     void saveObjectsWithPlanes(std::string path, const std::vector<PlaneWithObjInd> objects, pcl::PointCloud<PointNormal>::Ptr cloud);
     void mergeObjects(std::vector<PlaneWithObjInd>& objects);
     std::vector<double> filterBasedOnColor(std::vector<PlaneWithObjInd>& objects, pcl::PointCloud<PointNormal>::Ptr cloud, int _nr_binsh=10);
-    std::vector<int> removePlanarObjects (std::vector<PlaneWithObjInd>& objects, pcl::PointCloud<PointNormal>::Ptr cloud, float _plane_dist_thr=0.005);
+    std::vector<int> removePlanarObjects (std::vector<PlaneWithObjInd>& objects, pcl::PointCloud<PointNormal>::Ptr cloud, float _plane_dist_thr=0.01);
     int checkPlanarity (PlaneWithObjInd& objects, pcl::PointCloud<PointNormal>::Ptr cloud, float _plane_dist_thr);
-    void filterPlanarAndColor(std::vector<PlaneWithObjInd>& objects, pcl::PointCloud<PointNormal>::Ptr cloud, std::string path, float _plane_dist_thr=0.005, int _nr_bins=10 );
-    double checkColorSimilarity(PlaneWithObjInd& object, pcl::PointCloud<PointNormal>::Ptr cloud, std::string path="", int _nr_bins=10) ;
+    void filterPlanarAndColor(std::vector<PlaneWithObjInd>& objects, pcl::PointCloud<PointNormal>::Ptr cloud, std::string path, float _plane_dist_thr=0.01, int _nr_bins=10 );
+    double checkColorSimilarityHistogram(PlaneWithObjInd& object, pcl::PointCloud<PointNormal>::Ptr cloud, std::string path="", int _nr_bins=10) ;
     void cleanResult(std::vector<DetectedObject> &detected_objects);
     void matchAndRemoveObjects (pcl::PointCloud<PointNormal>::Ptr remaining_scene_points, pcl::PointCloud<PointNormal>::Ptr full_object_cloud, std::vector<PlaneWithObjInd> &extracted_objects);
     DetectedObject fromPlaneIndObjToDetectedObject (pcl::PointCloud<PointNormal>::Ptr curr_cloud, PlaneWithObjInd obj);
     int checkVerticalPlanarity(PlaneWithObjInd& object, pcl::PointCloud<PointNormal>::Ptr cloud, float _plane_dist_thr);
     void filterVerticalPlanes(std::vector<PlaneWithObjInd>& objects, pcl::PointCloud<PointNormal>::Ptr cloud, std::string path, float _plane_dist_thr=0.005);
-
+    void filterSmallVolumes(std::vector<DetectedObject> &objects, double volume_thr);
 };
 
 #endif // CHANGE_DETECTION_H
