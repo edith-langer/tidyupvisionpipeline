@@ -19,9 +19,8 @@ class RegionGrowing
 public:
     RegionGrowing(typename pcl::PointCloud<PointT>::ConstPtr scene, typename pcl::PointCloud<PointQ>::ConstPtr object,
                   pcl::PointCloud<pcl::Normal>::ConstPtr scene_normals, bool is_object_downsampled,
-                  float color_thr=std::numeric_limits<float>::max(),
-                  double octree_res=0.05, float eps_angle_threshold_deg=10, float max_neighbour_distance=0.02, float curvature_threshold=0.08
-                  ) :
+                  float color_thr=std::numeric_limits<float>::max(), float eps_angle_threshold_deg=10, float max_neighbour_distance=0.01, float curvature_threshold=0.08,
+                  double octree_res=0.05) :
         scene_(scene), object_(object), scene_normals_(scene_normals), is_object_downsampled_(is_object_downsampled),
         octree_res_(octree_res), eps_angle_threshold_deg_(eps_angle_threshold_deg),
         max_neighbour_distance_(max_neighbour_distance), curvature_threshold_(curvature_threshold), color_thr_(color_thr)

@@ -87,9 +87,17 @@ LVResult LocalObjectVerification::computeLV() {
     //TODO: does a two-step alignment process similar to IROS2020 makes sense?
     //the reconstructions are quite small and should be good enough for alignment
 
-    //ICP alignment
+    //ICP alignment with x,y,z,z-axis alignment
+    pcl::registration::WarpPointRigid4D<PointNormal, PointNormal>::Ptr warp_fcn_4d (new pcl::registration::WarpPointRigid4D<PointNormal, PointNormal>);
+
+    // Create a TransformationEstimationLM object, and set the warp to it
+    pcl::registration::TransformationEstimationLM<PointNormal, PointNormal>::Ptr te (new pcl::registration::TransformationEstimationLM<PointNormal, PointNormal>);
+    te->setWarpFunction (warp_fcn_4d);
+
+
     pcl::PointCloud<PointNormal>::Ptr curr_object_registered(new pcl::PointCloud<PointNormal>());
-    pcl::IterativeClosestPointWithNormals<PointNormal, PointNormal> icp;
+    pcl::IterativeClosestPoint<PointNormal, PointNormal> icp;
+    icp.setTransformationEstimation(te);
     icp.setInputSource(curr_object_noNans);
     icp.setInputTarget(ref_object_noNans);
     icp.setMaxCorrespondenceDistance(params_.icp_max_corr_dist_plane);
@@ -122,14 +130,16 @@ LVResult LocalObjectVerification::computeLV() {
 
             //remove very small clusters from the diff
             std::vector<int> small_cluster_ind;
-            ObjectMatching::clusterOutliersBySize(ref_diff_cloud, small_cluster_ind, 0.014, 30);
+            ObjectMatching::clusterOutliersBySize(ref_diff_cloud, small_cluster_ind, 0.014, min_object_size);
             for (int i = small_cluster_ind.size() - 1; i >= 0; i--) { //small cluster ind is sorted ascending
                 diff_ind.erase(diff_ind.begin() + small_cluster_ind[i]);
             }
 
-            if (diff_ind.size() < 100) { //if less than 100 points left, we do not split the ref object
+            if (diff_ind.size() < min_object_size) { //if less than 100 points left, we do not split the ref object
                 result.model_non_matching_pts = std::vector<int>{};
             }
+
+
             //split the ref object cloud
             else {
                 //the part that is matched
@@ -158,12 +168,12 @@ LVResult LocalObjectVerification::computeLV() {
 
             //remove very small clusters from the diff
             small_cluster_ind.clear();
-            ObjectMatching::clusterOutliersBySize(curr_diff_cloud, small_cluster_ind, 0.014, 30);
+            ObjectMatching::clusterOutliersBySize(curr_diff_cloud, small_cluster_ind, 0.014, min_object_size);
 
             for (int i = small_cluster_ind.size() - 1; i >= 0; i--) {
                 diff_ind.erase(diff_ind.begin() + small_cluster_ind[i]);
             }
-            if (diff_ind.size() < 100) { //if less than 100 points left, we do not split the ref object
+            if (diff_ind.size() < min_object_size) { //if less than 100 points left, we do not split the ref object
                 result.obj_non_matching_pts = std::vector<int>{};
             }
             //split the curr object cloud
@@ -190,11 +200,9 @@ LVResult LocalObjectVerification::computeLV() {
                 for (size_t i = 0; i < diff_ind.size(); i++)
                     curr_orig_ind.push_back(curr_nan[diff_ind[i]]);
                 result.obj_non_matching_pts = curr_orig_ind;
-
-                return result;
             }
+            return result;
         }
-        // no correspondence found
     }
     //tranform back to orig ind
     std::vector<int> ref_orig_ind;

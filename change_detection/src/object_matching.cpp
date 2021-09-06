@@ -168,7 +168,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
                 h->confidence_ = std::max(fitness_score.object_conf, fitness_score.model_conf);
                 std::cout << "Confidence " << object_hypotheses.object_id << "-" << h->model_id_ << " " << h->confidence_ << std::endl;
 
-                std::string result_cloud_path = cloud_matches_dir + "/matchResult_model_" + h->model_id_ +"_conf_" + std::to_string(h->confidence_)+ "_" +
+                std::string result_cloud_path = cloud_matches_dir + "/conf_" + std::to_string(h->confidence_)+ "_model_" + h->model_id_ + "_" +
                         (ppf_params.ppf_rec_pipeline_.use_color_ ? "_color" : "");
                 saveCloudResults(object_vec_[i].getObjectCloud(), model_aligned, model_aligned_refined, result_cloud_path);
             }
@@ -225,7 +225,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
                                                                                                model_aligned_refined, diff_ind, corresponding_ind);
             //remove very small clusters from the diff
             std::vector<int> small_cluster_ind;
-            ObjectMatching::clusterOutliersBySize(object_leftover, small_cluster_ind, 0.014, 400);
+            ObjectMatching::clusterOutliersBySize(object_leftover, small_cluster_ind, 0.014, min_object_size);
             for (int i = small_cluster_ind.size() - 1; i >= 0; i--) {
                 object_leftover->points.erase(object_leftover->points.begin() + small_cluster_ind[i]);
             }
@@ -238,7 +238,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
 
             //remove very small clusters from the diff
             small_cluster_ind.clear();
-            ObjectMatching::clusterOutliersBySize(model_leftover, small_cluster_ind, 0.014, 400);
+            ObjectMatching::clusterOutliersBySize(model_leftover, small_cluster_ind, 0.014, min_object_size);
             for (int i = small_cluster_ind.size() - 1; i >= 0; i--) {
                 model_leftover->points.erase(model_leftover->points.begin() + small_cluster_ind[i]);
             }
@@ -253,7 +253,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
         }
 
         //First, erase all hypotheses where there are less than 100 points of the object not explained
-        global_scene_hypotheses.erase(std::remove_if(global_scene_hypotheses.begin(), global_scene_hypotheses.end(), [](const ObjectHypothesesStruct oh) {return oh.obj_pts_not_explained_cloud->points.size() < 100; }), global_scene_hypotheses.end());
+        global_scene_hypotheses.erase(std::remove_if(global_scene_hypotheses.begin(), global_scene_hypotheses.end(), [](const ObjectHypothesesStruct oh) {return oh.obj_pts_not_explained_cloud->points.size() < min_object_size; }), global_scene_hypotheses.end());
         if (global_scene_hypotheses.size() == 0) {
             break;
         }
@@ -263,7 +263,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
                 //Second, update the confidences using the unexplained model points
                 v4r::ObjectHypothesis::Ptr &oh = ohs.hypotheses[h].ohs_[0];
                 int model_id = std::stoi(oh->model_id_);
-                if (model_id_cloud.at(model_id)->size() < 100) {
+                if (model_id_cloud.at(model_id)->size() < min_object_size) {
                     oh->confidence_ = 0.0;
                 }
                 else {
@@ -316,14 +316,14 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
 
         //remove very small clusters from the diff
         std::vector<int> small_cluster_ind;
-        ObjectMatching::clusterOutliersBySize(model_diff_cloud, small_cluster_ind, 0.014, 400);
+        ObjectMatching::clusterOutliersBySize(model_diff_cloud, small_cluster_ind, 0.014, min_object_size);
         for (int i = small_cluster_ind.size() - 1; i >= 0; i--) {
             model_diff_cloud->points.erase(model_diff_cloud->points.begin() + small_cluster_ind[i]);
             diff_ind.erase(diff_ind.begin() + small_cluster_ind[i]);
         }
         model_diff_cloud->width = model_diff_cloud->points.size();
 
-        if (model_diff_cloud->size() == 0 || diff_ind.size() < 100) { //if less than 100 points left, we do not split the model object
+        if (model_diff_cloud->size() == 0 || diff_ind.size() < min_object_size) { //if less than 100 points left, we do not split the model object
             if (is_static) {
                 ro_iter->state_ = ObjectState::STATIC;
                 ro_iter->match_ = match;
@@ -363,7 +363,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
         pcl::PointCloud<PointNormal>::Ptr object_diff_cloud = scene_diff.computeDifference(object_cloud, model_aligned, diff_ind, corresponding_ind);
 
         small_cluster_ind.clear();
-        ObjectMatching::clusterOutliersBySize(object_diff_cloud, small_cluster_ind, 0.014, 400);
+        ObjectMatching::clusterOutliersBySize(object_diff_cloud, small_cluster_ind, 0.014, min_object_size);
         for (int i = small_cluster_ind.size() - 1; i >= 0; i--) {
             object_diff_cloud->points.erase(object_diff_cloud->points.begin() + small_cluster_ind[i]);
             diff_ind.erase(diff_ind.begin() + small_cluster_ind[i]);
@@ -371,7 +371,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
         object_diff_cloud->width = object_diff_cloud->points.size();
 
 
-        if (object_diff_cloud->size() == 0 || diff_ind.size() < 100) { //if less than 100 points left, we do not split the object
+        if (object_diff_cloud->size() == 0 || diff_ind.size() < min_object_size) { //if less than 100 points left, we do not split the object
             if (is_static) {
                 co_iter->state_ = ObjectState::STATIC;
                 co_iter->match_ = match;
@@ -405,7 +405,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
             boost::filesystem::path model_path_orig(model_path_);
             std::string cloud_matches_dir =  model_path_orig.remove_trailing_separator().parent_path().string() + "/matches/object" + std::to_string(match.object_id) + "_part_match";
             boost::filesystem::create_directories(cloud_matches_dir);
-            std::string result_cloud_path = cloud_matches_dir + "/matchResult_model_" + std::to_string(match.model_id) +"_conf_" + std::to_string(match.confidence)+ "_" +
+            std::string result_cloud_path = cloud_matches_dir + "/conf_" + std::to_string(match.confidence)+ "_model_" + std::to_string(match.model_id) + "_" +
                     (ppf_params.ppf_rec_pipeline_.use_color_ ? "_color" : "");
             saveCloudResults(matched_object_part, model_aligned, model_aligned, result_cloud_path); //we don't have access to the not refined model
 
@@ -413,13 +413,15 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
             //pcl::io::savePCDFile("/home/edith/object_part.pcd", *matched_object_part);
             //pcl::io::savePCDFile("/home/edith/object_remaining.pcd", *object_diff_cloud);
         }
-        //recompute FitnessInformation
+        //recompute FitnessInformation - the fitness score was not set before
         v4r::apps::PPFRecognizerParameter params;
         pcl::PointCloud<PointNormal>::Ptr object_aligned (new pcl::PointCloud<PointNormal>);
-        pcl::transformPointCloud(*co_iter->getObjectCloud(), *object_aligned, match.transform.inverse());
+        pcl::transformPointCloudWithNormals(*co_iter->getObjectCloud(), *object_aligned, match.transform.inverse());
         FitnessScoreStruct fitness_score = computeModelFitness(object_aligned, ro_iter->getObjectCloud(), params);
         co_iter->match_.fitness_score = fitness_score;
         ro_iter->match_.fitness_score = fitness_score;
+        co_iter->match_.confidence = std::max(fitness_score.object_conf, fitness_score.model_conf);
+        ro_iter->match_.confidence = std::max(fitness_score.object_conf, fitness_score.model_conf);
 
 
         //ATTENTION: The ro_iter is invalid now because of the push_back. Vector re-allocates and invalidates pointers
@@ -639,6 +641,8 @@ FitnessScoreStruct ObjectMatching::computeModelFitness(pcl::PointCloud<PointNorm
     Eigen::VectorXf modelFit = Eigen::VectorXf::Zero(model->size());
     Eigen::VectorXf objectFit = Eigen::VectorXf::Zero(object->size());
 
+    std::vector<int> obj_expl_ind, model_expl_ind;
+
     for (const v4r::ModelSceneCorrespondence &c : model_object_c) {
         size_t oidx = c.scene_id_;
         size_t midx = c.model_id_;
@@ -646,11 +650,15 @@ FitnessScoreStruct ObjectMatching::computeModelFitness(pcl::PointCloud<PointNorm
         if (!object_explained_pts(oidx)) {
             object_explained_pts(oidx) = true;
             objectFit(oidx) = c.fitness_;
+            if (c.fitness_ == 1.0)
+                obj_expl_ind.push_back(oidx);
         }
 
         if (!model_explained_pts(midx)) {
             model_explained_pts(midx) = true;
             modelFit(midx) = c.fitness_;
+            if (c.fitness_ == 1.0)
+                model_expl_ind.push_back(midx);
         }
     }
 
@@ -658,19 +666,17 @@ FitnessScoreStruct ObjectMatching::computeModelFitness(pcl::PointCloud<PointNorm
     //--> no because the conficence for only partly overlapping objects is very big then
 
     //from bool array to indices
-    std::vector<int> obj_expl_ind, model_expl_ind;
+
 
     int nr_model_overlapping_pts = 0, nr_object_overlappingt_pts = 0;
     for (size_t i = 0; i < model_overlapping_pts.size(); i++) {
         if (model_overlapping_pts[i]) {
             nr_model_overlapping_pts++;
-            model_expl_ind.push_back(i);
         }
     }
     for (size_t i = 0; i < object_overlapping_pts.size(); i++) {
         if (object_overlapping_pts[i]) {
             nr_object_overlappingt_pts++;
-            obj_expl_ind.push_back(i);
         }
     }
 
@@ -679,8 +685,6 @@ FitnessScoreStruct ObjectMatching::computeModelFitness(pcl::PointCloud<PointNorm
 
     float object_fit = objectFit.sum();
     float object_confidence = object->empty() ? 0.f : object_fit / object->size(); //nr_object_overlappingt_pts;
-
-
 
     FitnessScoreStruct fitness_struct(object_confidence, model_confidence, obj_expl_ind, model_expl_ind);
 

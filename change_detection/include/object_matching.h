@@ -43,12 +43,14 @@
 
 #include <PPFRecognizer.h>
 
+#include "settings.h"
+
 
 typedef pcl::PointXYZRGB PointRGB;
 typedef pcl::PointXYZRGBNormal PointNormal;
 typedef pcl::PointXYZRGBL PointLabel;
 
-static const float point_dist_diff = 0.01f;
+static const float point_dist_diff = 0.005f;
 
 //boost graph defs
 struct VertexProperty {

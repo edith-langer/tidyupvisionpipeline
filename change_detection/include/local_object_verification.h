@@ -18,10 +18,13 @@
 #include "color_histogram.h"
 #include "object_matching.h"
 
+#include "settings.h"
+
 typedef pcl::PointXYZRGBNormal PointNormal;
 
+
 struct LocalObjectVerificationParams {
-    float diff_dist =0.02;
+    float diff_dist =0.015;
     float add_crop_static = 0.2;
     float icp_max_corr_dist = 0.15;
     float icp_max_corr_dist_plane = 0.05;
