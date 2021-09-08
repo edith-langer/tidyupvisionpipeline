@@ -34,7 +34,7 @@ float cluster_thr = 0.02;
 int min_cluster_size = 100;
 
 
-std::string anno_file_name = "merged_plane_clouds__fusedPoses_i100_biggerLambda";
+std::string anno_file_name = "merged_plane_clouds_ds002";
 
 std::string c_dis_obj_name = "curr_displaced_objects.pcd";
 std::string c_new_obj_name = "curr_new_objects.pcd";
@@ -88,6 +88,7 @@ int remainingClusters (pcl::PointCloud<PointLabel>::Ptr cloud, float cluster_thr
 void writeSumResultsToFile(std::vector<Measurements> all_gt_results, std::vector<Measurements> all_tp_results, std::vector<Measurements> all_fp_results, std::string path);
 int extractDetectedObjects(std::vector<GTObject> gt_objects, pcl::PointCloud<PointLabel>::Ptr result_cloud, std::map<std::string, int> &gt_obj_count, std::map<std::string, int> &det_obj_count);
 void writeObjectSummaryToFile(std::map<std::string, int> & gt_obj_count, std::map<std::string, int> & det_obj_count, std::map<std::string, int> &tp_class_obj_count, std::string path);
+int computeStaticFP(std::map<std::string, pcl::PointCloud<PointLabel>::Ptr> obj_name_cloud_map, pcl::PointCloud<PointLabel>::Ptr static_leftover_cloud);
 
 std::ostream& operator<<(std::ostream& output, Measurements const& m)
 {
@@ -347,8 +348,8 @@ int main(int argc, char* argv[])
 
         gt_measurements.nr_det_obj = gt_measurements.nr_novel_obj + gt_measurements.nr_removed_obj + gt_measurements.nr_static_obj + gt_measurements.nr_moved_obj;
 
-        pcl::io::savePCDFileBinary("/home/edith/" + scene_comp.ref_scene + "-" + scene_comp.curr_scene + ".pcd", *ref_GT_cloud);
-        pcl::io::savePCDFileBinary("/home/edith/" + scene_comp.curr_scene + "-" + scene_comp.ref_scene + ".pcd", *curr_GT_cloud);
+        pcl::io::savePCDFileBinary(scene_comp.result_path + "/" + scene_comp.ref_scene + "-" + scene_comp.curr_scene + ".pcd", *ref_GT_cloud);
+        pcl::io::savePCDFileBinary(scene_comp.result_path + "/" + scene_comp.curr_scene + "-" + scene_comp.ref_scene + ".pcd", *curr_GT_cloud);
 
         GTLabeledClouds gt_labeled_clouds;
         gt_labeled_clouds.ref_GT_cloud = ref_GT_cloud;
@@ -586,6 +587,10 @@ int main(int argc, char* argv[])
         //TODO: is there something like static FP? everything in the scene is more or less static except for YCB objects
         //            FP_results.nr_static_obj = remainingClusters(r_static_obj_cloud, cluster_thr, min_cluster_size, scene_comp.result_path+"/rem_ref_static.pcd");
         //            FP_results.nr_static_obj += remainingClusters(c_static_obj_cloud, cluster_thr, min_cluster_size, scene_comp.result_path+"/rem_curr_static.pcd");
+        FP_results.nr_static_obj = computeStaticFP(scene_annotations_map[scene_comp.ref_scene], r_static_obj_cloud);
+        FP_results.nr_static_obj += computeStaticFP(scene_annotations_map[scene_comp.curr_scene], c_static_obj_cloud);
+        pcl::io::savePCDFileBinary(scene_comp.result_path+"/rem_ref_static.pcd", *r_static_obj_cloud);
+        pcl::io::savePCDFileBinary( scene_comp.result_path+"/rem_curr_static.pcd", *c_static_obj_cloud);
 
         //get back the original clouds
         readInput(scene_comp.result_path + "/" + r_dis_obj_name, r_moved_obj_cloud);
@@ -598,7 +603,6 @@ int main(int argc, char* argv[])
         *curr_result_cloud += *c_moved_obj_cloud;
         *curr_result_cloud += *c_static_obj_cloud;
         *curr_result_cloud += *novel_obj_cloud;
-        pcl::io::savePCDFileBinary("/home/edith/curr_cloud.pcd", *curr_result_cloud);
         result.nr_det_obj = extractDetectedObjects(gt_cloud_numbers.curr_objects, curr_result_cloud, gt_obj_count_comp, det_obj_count_comp);
         pcl::PointCloud<PointLabel>::Ptr ref_result_cloud(new pcl::PointCloud<PointLabel>());
         *ref_result_cloud += *r_moved_obj_cloud;
@@ -618,6 +622,20 @@ int main(int argc, char* argv[])
         std::cout << "Found MOVED objects: " << matched_moved << std::endl;
         std::cout << "Found STATIC objects: " << matched_static << std::endl;
         std::cout << "###############################################" << std::endl;
+
+        std::ofstream scene_comp_result_file;
+        scene_comp_result_file.open(scene_comp.result_path+"/result.txt");
+        scene_comp_result_file << "GT numbers \n" << gt_cloud_numbers.m;
+        scene_comp_result_file << "-------------------------------------------" << "\n";
+        scene_comp_result_file << "True Positives" << "\n" << result;
+        scene_comp_result_file << "-------------------------------------------" << "\n";
+        scene_comp_result_file << "False Positives" << "\n" << FP_results;
+        scene_comp_result_file << "-------------------------------------------" << "\n";
+        scene_comp_result_file << "Found NOVEL objects: " << curr_matched_novel << "\n";
+        scene_comp_result_file << "Found REMOVED objects: " << ref_matched_removed << "\n";
+        scene_comp_result_file << "Found MOVED objects: " << matched_moved << "\n";
+        scene_comp_result_file << "Found STATIC objects: " << matched_static << "\n";
+        scene_comp_result_file.close();
 
         all_gt_results.push_back(gt_cloud_numbers.m);
         all_tp_results.push_back(result);
@@ -693,6 +711,33 @@ int remainingClusters (pcl::PointCloud<PointLabel>::Ptr cloud, float cluster_thr
         pcl::io::savePCDFile(path, *no_nans_cloud);
 
     return cluster_indices.size();
+}
+
+int computeStaticFP(std::map<std::string, pcl::PointCloud<PointLabel>::Ptr> obj_name_cloud_map, pcl::PointCloud<PointLabel>::Ptr static_leftover_cloud) {
+    int fp = 0;
+    std::vector<int> nan_ind;
+    pcl::PointCloud<PointLabel>::Ptr no_nans_cloud(new pcl::PointCloud<PointLabel>);
+    static_leftover_cloud->is_dense = false;
+    pcl::removeNaNFromPointCloud(*static_leftover_cloud, *no_nans_cloud, nan_ind);
+    if (no_nans_cloud->size() == 0) {
+        return 0;
+    }
+    for (auto gt_obj : obj_name_cloud_map) {
+        int nr_det_obj = 0;
+        pcl::search::KdTree<PointLabel>::Ptr tree (new pcl::search::KdTree<PointLabel>);
+        tree->setInputCloud (no_nans_cloud);
+        std::vector<int> nn_indices, overlapping_ind;
+        std::vector<float> nn_distances;
+
+        for (const PointLabel p : gt_obj.second->points) {
+            if (tree->radiusSearch(p, 0.005, nn_indices, nn_distances) > 0) {
+                fp++;
+                std::cout << "FP static: " << gt_obj.first << std::endl;
+                break;
+            }
+        }
+    }
+    return fp;
 }
 
 //an object counts as detected if > 50 % of it were detected
