@@ -33,7 +33,6 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
     int verbosity = 0;
     bool force_retrain = false;  // if true, will retrain object models even if trained data already exists
 
-    v4r::apps::PPFRecognizerParameter ppf_params;
     po::options_description desc("PPF Object Instance Recognizer\n"
                                  "==============================\n"
                                  "     **Allowed options**\n");
@@ -178,7 +177,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
             hg.ohs_.resize(1);
 
         }
-        hypothesis_groups.erase(std::remove_if(hypothesis_groups.begin(),hypothesis_groups.end(), [&ppf_params](const auto &a){ return a.ohs_[0]->confidence_ < ppf_params.min_graph_conf_thr_ ; }), hypothesis_groups.end());
+        hypothesis_groups.erase(std::remove_if(hypothesis_groups.begin(),hypothesis_groups.end(), [](const auto &a){ return a.ohs_[0]->confidence_ < ppf_params.min_graph_conf_thr_ ; }), hypothesis_groups.end());
 
         if (hypothesis_groups.size() > 0 ) {
             object_hypotheses.hypotheses = hypothesis_groups;
@@ -275,7 +274,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
                     oh->confidence_ = std::max(fitness_score.object_conf, fitness_score.model_conf);
                 }
             }
-            ohs.hypotheses.erase(std::remove_if(ohs.hypotheses.begin(),ohs.hypotheses.end(), [&ppf_params](const auto &a){ return a.ohs_[0]->confidence_ < ppf_params.min_graph_conf_thr_ ; }), ohs.hypotheses.end());
+            ohs.hypotheses.erase(std::remove_if(ohs.hypotheses.begin(),ohs.hypotheses.end(), [](const auto &a){ return a.ohs_[0]->confidence_ < ppf_params.min_graph_conf_thr_ ; }), ohs.hypotheses.end());
         }
         global_scene_hypotheses.erase(std::remove_if(global_scene_hypotheses.begin(), global_scene_hypotheses.end(), [](const ObjectHypothesesStruct oh) {return oh.hypotheses.size() == 0; }), global_scene_hypotheses.end());
 
@@ -286,7 +285,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
         //build a new graph with the remaining ones
         model_obj_matches_single_run = weightedGraphMatching(global_scene_hypotheses);
     }
-    model_obj_matches.erase(std::remove_if(model_obj_matches.begin(),model_obj_matches.end(), [&ppf_params](const auto &a){ return a.confidence < ppf_params.min_result_conf_thr_ ; }), model_obj_matches.end());
+    model_obj_matches.erase(std::remove_if(model_obj_matches.begin(),model_obj_matches.end(), [](const auto &a){ return a.confidence < ppf_params.min_result_conf_thr_ ; }), model_obj_matches.end());
 
     std::cout << "Time spent to recognize objects with PPF: " << (ppf_rec_time_sum/1000) << " seconds." << std::endl;
 
@@ -603,7 +602,8 @@ FitnessScoreStruct ObjectMatching::computeModelFitness(pcl::PointCloud<PointNorm
         query_pt.getVector4fMap() = model->at(midx).getVector4fMap();
         object_octree->radiusSearch(query_pt, param.hv_.inlier_threshold_xyz_, nn_indices, nn_sqrd_distances);
 
-        const auto normal_m = model->points[midx].getNormalVector4fMap();
+        const Eigen::Vector4f normal_m4f = model->points[midx].getNormalVector4fMap(); //sometimes the last value is nan
+        const Eigen::Vector3f normal_m = normal_m4f.head<3>();
 
         for (size_t k = 0; k < nn_indices.size(); k++) {
             int sidx = nn_indices[k];
@@ -612,20 +612,27 @@ FitnessScoreStruct ObjectMatching::computeModelFitness(pcl::PointCloud<PointNorm
             object_overlapping_pts[sidx] = true;
 
             v4r::ModelSceneCorrespondence c(sidx, midx);
-            const auto normal_s = object->at(sidx).getNormalVector4fMap();
+            const Eigen::Vector4f normal_s4f = object->points[sidx].getNormalVector4fMap();
+            const Eigen::Vector3f normal_s = normal_s4f.head<3>();
             c.normals_dotp_ = normal_m.dot(normal_s);
 
-            bool normal_score = c.normals_dotp_ > param.hv_.inlier_threshold_normals_dotp_;
-            bool color_score = true;
+            float normal_score = c.normals_dotp_ < param.hv_.inlier_threshold_normals_dotp_ ? 0.0 : c.normals_dotp_;
+            //bool normal_score = c.normals_dotp_ > param.hv_.inlier_threshold_normals_dotp_;
+            //bool color_score = true;
+            float color_score = 1.0;
             if (!param.hv_.ignore_color_even_if_exists_) {
                 Eigen::Vector3i  m_rgb =  model->points[midx].getRGBVector3i();
                 Eigen::Vector3f color_m = rgb2lab(m_rgb);
                 Eigen::Vector3i  o_rgb =  object->points[sidx].getRGBVector3i();
                 Eigen::Vector3f color_o = rgb2lab(o_rgb);
                 c.color_distance_ = v4r::computeCIEDE2000(color_o, color_m);
-                color_score = c.color_distance_ < param.hv_.inlier_threshold_color_;
+                //color_score = c.color_distance_ < param.hv_.inlier_threshold_color_;
+                color_score = c.color_distance_ > param.hv_.inlier_threshold_color_ ? 0.0 :  1-(c.color_distance_ / param.hv_.inlier_threshold_color_);
             }
-            c.fitness_ = normal_score * color_score; //either 0 or 1
+            c.fitness_ = 0.7*normal_score + 0.3*color_score;
+            if (c.fitness_ != c.fitness_)
+                std::cout << "fitness is nan" << std::endl;
+            //c.fitness_ = normal_score * color_score; //either 0 or 1
             model_object_c.push_back(c);
         }
     }
@@ -650,23 +657,20 @@ FitnessScoreStruct ObjectMatching::computeModelFitness(pcl::PointCloud<PointNorm
         if (!object_explained_pts(oidx)) {
             object_explained_pts(oidx) = true;
             objectFit(oidx) = c.fitness_;
-            if (c.fitness_ == 1.0)
+            if (c.fitness_ > 0.0)
                 obj_expl_ind.push_back(oidx);
         }
 
         if (!model_explained_pts(midx)) {
             model_explained_pts(midx) = true;
             modelFit(midx) = c.fitness_;
-            if (c.fitness_ == 1.0)
+            if (c.fitness_ > 0.0)
                 model_expl_ind.push_back(midx);
         }
     }
 
     //don't divide by the number of all points, but only by the number of overlapping  points --> better results for combined objects?
     //--> no because the conficence for only partly overlapping objects is very big then
-
-    //from bool array to indices
-
 
     int nr_model_overlapping_pts = 0, nr_object_overlappingt_pts = 0;
     for (size_t i = 0; i < model_overlapping_pts.size(); i++) {

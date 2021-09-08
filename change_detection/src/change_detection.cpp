@@ -868,6 +868,8 @@ int ChangeDetection::checkVerticalPlanarity(PlaneWithObjInd& object, pcl::PointC
 
     std::cout << "plane points: " << inliers->indices.size() << "; object points " <<  obj_ind.size() << std::endl;
 
+    if (inliers->indices.size() == 0)
+        return 0;
     //I don't know why this is happening, but it is apprently not a correct solution and would include all points as plane inliers
     if (coefficients->values[0] == 0 && coefficients->values[1] == 0 && coefficients->values[2] == 0 && coefficients->values[3] == 0)
         return 0;
@@ -1090,6 +1092,8 @@ void ChangeDetection::refineNormals(pcl::PointCloud<PointNormal>::Ptr object_clo
     }
 
     pcl::concatenateFields(*object_cloud, *object_normals, *object_cloud); //data in the second cloud will overwrite the data in the first
+    std::vector<int> nan;
+    pcl::removeNaNNormalsFromPointCloud(*object_cloud, *object_cloud, nan);
 }
 
 void ChangeDetection::mergeObjectParts(std::vector<DetectedObject> &detected_objects, std::string merge_object_parts_folder) {
@@ -1385,7 +1389,7 @@ void ChangeDetection::matchAndRemoveObjects (pcl::PointCloud<PointNormal>::Ptr r
         //check color
         v4r::apps::PPFRecognizerParameter params;
         FitnessScoreStruct fitness_score = ObjectMatching::computeModelFitness(object_registered, remaining_cloud_crop, params);
-        if (fitness_score.object_conf > 0.7) {
+        if (fitness_score.object_conf > ppf_params.min_result_conf_thr_) {
             obj_iter = extracted_objects.erase(obj_iter);
         }
         else {
