@@ -34,6 +34,7 @@
 #include "color_histogram.h"
 
 #include "settings.h"
+#include "mathhelpers.h"
 
 typedef pcl::PointXYZRGBNormal PointNormal;
 typedef pcl::PointXYZRGBL PointLabel;
@@ -94,7 +95,7 @@ private:
                                   std::vector<PlaneWithObjInd> &objects, double leaf_size, std::string res_path);
     std::tuple<pcl::PointCloud<PointNormal>::Ptr, std::vector<int> > upsampleObjects(pcl::octree::OctreePointCloudSearch<PointNormal>::Ptr octree, pcl::PointCloud<PointNormal>::Ptr orig_input_cloud,
                                                                                      pcl::PointCloud<PointNormal>::Ptr objects_ds_cloud, std::string output_path, int counter);
-    void objectRegionGrowing(pcl::PointCloud<PointNormal>::Ptr cloud, std::vector<PlaneWithObjInd> &objects, int max_object_size = 10000); // std::numeric_limits<int>::max());
+    void objectRegionGrowing(pcl::PointCloud<PointNormal>::Ptr cloud, std::vector<PlaneWithObjInd> &objects, int max_object_size = 5000); // std::numeric_limits<int>::max());
     pcl::PointCloud<PointNormal>::Ptr fromObjectVecToObjectCloud(const std::vector<PlaneWithObjInd> objects, pcl::PointCloud<PointNormal>::Ptr cloud, bool keepOrganized=true);
     void saveObjectsWithPlanes(std::string path, const std::vector<PlaneWithObjInd> objects, pcl::PointCloud<PointNormal>::Ptr cloud);
     void mergeObjects(std::vector<PlaneWithObjInd>& objects);

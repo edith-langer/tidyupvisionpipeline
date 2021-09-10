@@ -1192,8 +1192,8 @@ void ChangeDetection::mergeObjectParts(std::vector<DetectedObject> &detected_obj
                     pcl::PointCloud<PointNormal>::Ptr object_j_refined(new pcl::PointCloud<PointNormal>);
                     pcl::copyPointCloud(*detected_objects[i].getObjectCloud(), *object_i_refined);
                     pcl::copyPointCloud(*detected_objects[j].getObjectCloud(), *object_j_refined);
-                    refineNormals(object_i_refined);
-                    refineNormals(object_j_refined);
+                    //refineNormals(object_i_refined);
+                    //refineNormals(object_j_refined);
 
                     pcl::io::savePCDFileBinary(path + "/good_fitness_points.pcd", *good_pts);
                     pcl::io::savePCDFileBinary(path+ "/startingToMerge" + std::to_string(detected_objects[j].getID()) + ".pcd", *object_j_refined);
@@ -1226,6 +1226,7 @@ void ChangeDetection::mergeObjectParts(std::vector<DetectedObject> &detected_obj
                     extract.setKeepOrganized(false);
                     extract.filter(*detected_objects[i].getObjectCloud());
 
+
                     if (!detected_objects[j].getObjectCloud()->empty())
                         pcl::io::savePCDFileBinary(path + "/after_merging"+ std::to_string(detected_objects[j].getID()) + ".pcd", *detected_objects[j].getObjectCloud());
                     if (!detected_objects[i].getObjectCloud()->empty())
@@ -1247,6 +1248,9 @@ void ChangeDetection::mergeObjectParts(std::vector<DetectedObject> &detected_obj
                     extract.setNegative (true);
                     extract.setKeepOrganized(false);
                     extract.filter(*detected_objects[i].getObjectCloud());
+
+                    if (ObjectMatching::isObjectPlanar(detected_objects[i].getObjectCloud(), 0.01, 0.9))
+                        *detected_objects[j].getObjectCloud() += *detected_objects[i].getObjectCloud();
 
                     if (!detected_objects[j].getObjectCloud()->empty())
                         pcl::io::savePCDFileBinary(path + "/after_merging"+ std::to_string(detected_objects[j].getID()) + ".pcd", *detected_objects[j].getObjectCloud());

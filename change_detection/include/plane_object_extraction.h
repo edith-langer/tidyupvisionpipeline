@@ -25,32 +25,11 @@
 #include <pcl/common/centroid.h>
 
 #include "region_growing.h"
+#include "object_matching.h"
+#include "mathhelpers.h"
 
 typedef pcl::PointXYZRGBNormal PointNormal;
 typedef pcl::PointXYZRGB PointRGB;
-
-struct PlaneStruct {
-    pcl::PointIndices::Ptr plane_ind;
-    pcl::ModelCoefficients::Ptr coeffs;
-    float avg_z;
-
-    PlaneStruct(){}
-    PlaneStruct(pcl::PointIndices::Ptr ind, pcl::ModelCoefficients::Ptr c, float z) : plane_ind(ind), coeffs(c), avg_z(z) {}
-
-    bool operator < (const PlaneStruct& plane) const
-    {
-        //std::cout<<avg_z << " " << plane.avg_z << std::endl;
-        //return (-coeffs->values[3]/coeffs->values[2] < -plane.coeffs->values[3]/plane.coeffs->values[2]);
-        return avg_z < plane.avg_z;
-    }
-
-    PlaneStruct& operator=(const PlaneStruct rhs) {
-        plane_ind = boost::make_shared<pcl::PointIndices>(*(rhs.plane_ind));
-        avg_z =  rhs.avg_z;
-        coeffs = boost::make_shared<pcl::ModelCoefficients>(*(rhs.coeffs));
-        return *this;
-    }
-};
 
 
 struct PlaneWithObjInd {
@@ -80,6 +59,7 @@ private:
     void filter_flying_objects(pcl::PointCloud<PointNormal>::Ptr orig_cloud_, pcl::PointIndices::Ptr ind, pcl::PointCloud<PointNormal>::Ptr plane);
     pcl::PointIndices::Ptr findCorrespondingPlane(pcl::PointCloud<PointNormal>::Ptr cloud, std::vector<pcl::PointIndices> clusters);
     void shrinkConvexHull(pcl::PointCloud<PointNormal>::Ptr hull_cloud, float distance);
+    void filter_planar_objects(pcl::PointCloud<PointNormal>::Ptr cloud, pcl::PointIndices::Ptr ind);
 };
 
 #endif //PLANE_OBJECT_EXTRACTION_H

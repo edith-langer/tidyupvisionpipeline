@@ -589,8 +589,10 @@ int main(int argc, char* argv[])
         //            FP_results.nr_static_obj += remainingClusters(c_static_obj_cloud, cluster_thr, min_cluster_size, scene_comp.result_path+"/rem_curr_static.pcd");
         FP_results.nr_static_obj = computeStaticFP(scene_annotations_map[scene_comp.ref_scene], r_static_obj_cloud);
         FP_results.nr_static_obj += computeStaticFP(scene_annotations_map[scene_comp.curr_scene], c_static_obj_cloud);
-        pcl::io::savePCDFileBinary(scene_comp.result_path+"/rem_ref_static.pcd", *r_static_obj_cloud);
-        pcl::io::savePCDFileBinary( scene_comp.result_path+"/rem_curr_static.pcd", *c_static_obj_cloud);
+        if (!r_static_obj_cloud->empty())
+            pcl::io::savePCDFileBinary(scene_comp.result_path+"/rem_ref_static.pcd", *r_static_obj_cloud);
+        if (!c_static_obj_cloud->empty())
+            pcl::io::savePCDFileBinary( scene_comp.result_path+"/rem_curr_static.pcd", *c_static_obj_cloud);
 
         //get back the original clouds
         readInput(scene_comp.result_path + "/" + r_dis_obj_name, r_moved_obj_cloud);

@@ -229,6 +229,10 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
                 object_leftover->points.erase(object_leftover->points.begin() + small_cluster_ind[i]);
             }
 
+            //if the leftover is just a plane, remove it
+            if (isObjectPlanar(object_leftover, 0.01, 0.9))
+                object_leftover->clear();
+
             //remove points from model_clouds
             pcl::transformPointCloudWithNormals(*(model_id_cloud.at(model_id_match)), *model_aligned_refined, (*model_hyp_iter).ohs_[0]->pose_refinement_ * (*model_hyp_iter).ohs_[0]->transform_);
 
@@ -241,6 +245,10 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
             for (int i = small_cluster_ind.size() - 1; i >= 0; i--) {
                 model_leftover->points.erase(model_leftover->points.begin() + small_cluster_ind[i]);
             }
+
+            //if the leftover is just a plane, remove it
+            if (isObjectPlanar(model_leftover, 0.01, 0.9))
+                model_leftover->clear();
 
             //transform the model back to original
             pcl::transformPointCloudWithNormals(*model_leftover, *model_leftover, ((*model_hyp_iter).ohs_[0]->pose_refinement_ * (*model_hyp_iter).ohs_[0]->transform_).inverse());
@@ -322,7 +330,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
         }
         model_diff_cloud->width = model_diff_cloud->points.size();
 
-        if (model_diff_cloud->size() == 0 || diff_ind.size() < min_object_size) { //if less than 100 points left, we do not split the model object
+        if (model_diff_cloud->size() == 0 || diff_ind.size() < min_object_size || isObjectPlanar(model_diff_cloud, 0.01, 0.9)) { //if less than 100 points left, we do not split the model object
             if (is_static) {
                 ro_iter->state_ = ObjectState::STATIC;
                 ro_iter->match_ = match;
@@ -330,6 +338,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
                 ro_iter->state_ = ObjectState::DISPLACED;
                 ro_iter->match_ = match;
             }
+            model_diff_cloud->clear();
         }
         //split the model cloud
         else {
@@ -370,7 +379,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
         object_diff_cloud->width = object_diff_cloud->points.size();
 
 
-        if (object_diff_cloud->size() == 0 || diff_ind.size() < min_object_size) { //if less than 100 points left, we do not split the object
+        if (object_diff_cloud->size() == 0 || diff_ind.size() < min_object_size || isObjectPlanar(object_diff_cloud, 0.01, 0.9)) { //if less than 100 points left, we do not split the object
             if (is_static) {
                 co_iter->state_ = ObjectState::STATIC;
                 co_iter->match_ = match;
@@ -378,6 +387,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
                 co_iter->state_ = ObjectState::DISPLACED;
                 co_iter->match_ = match;
             }
+            object_diff_cloud->clear();
         }
         //split the object cloud
         else {
@@ -787,4 +797,28 @@ std::vector<pcl::PointIndices> ObjectMatching::clusterOutliersBySize(const pcl::
             filtered_ind.push_back(i);
     }
     return cluster_indices;
+}
+
+bool ObjectMatching::isObjectPlanar(pcl::PointCloud<PointNormal>::Ptr object, float plane_dist_thr, float plane_acc_thr) {
+    pcl::SACSegmentation<PointNormal> seg;
+    pcl::PointIndices::Ptr inliers (new pcl::PointIndices);
+    pcl::ModelCoefficients::Ptr coefficients (new pcl::ModelCoefficients);
+
+    seg.setOptimizeCoefficients (true);
+    seg.setModelType (pcl::SACMODEL_PLANE);
+    seg.setMethodType (pcl::SAC_RANSAC);
+    seg.setMaxIterations (100);
+    seg.setDistanceThreshold (plane_dist_thr);
+    seg.setInputCloud (object);
+    seg.segment (*inliers, *coefficients);
+
+    if (inliers->indices.size() == 0)
+        return false;
+    //I don't know why this is happening, but it is apprently not a correct solution and would include all points as plane inliers
+    if (coefficients->values[0] == 0 && coefficients->values[1] == 0 && coefficients->values[2] == 0 && coefficients->values[3] == 0)
+        return false;
+
+    if (inliers->indices.size()/object->size() > plane_acc_thr)
+        return true;
+    return false;
 }

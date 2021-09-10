@@ -8,7 +8,7 @@
 #include <pcl/PointIndices.h>
 #include <pcl/filters/filter.h>
 
-#include "plane_object_extraction.h"
+#include "mathhelpers.h"
 
 typedef pcl::PointXYZRGBNormal PointNormal;
 

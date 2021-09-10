@@ -90,6 +90,7 @@ public:
     static float estimateDistance(const pcl::PointCloud<PointNormal>::Ptr object_cloud, const pcl::PointCloud<PointNormal>::Ptr model_cloud, const Eigen::Matrix4f transform);
     static std::vector<pcl::PointIndices> clusterOutliersBySize(const pcl::PointCloud<PointNormal>::Ptr cloud, std::vector<int> &removed_ind, float cluster_thr,
                                                                 int min_cluster_size=15, int max_cluster_size=std::numeric_limits<int>::max());
+    static bool isObjectPlanar(pcl::PointCloud<PointNormal>::Ptr object, float plane_dist_thr, float plane_acc_thr);
 
 
 private:

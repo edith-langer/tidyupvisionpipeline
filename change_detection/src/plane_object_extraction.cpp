@@ -368,8 +368,13 @@ std::vector<PlaneWithObjInd> ExtractObjectsFromPlanes::extractObjectInd(pcl::Poi
             }
 
             //check if objects are flying
-            std::cout << "Object indices size before filtering " << object_indices->indices.size();
+            std::cout << "Object indices size before filtering flying objects" << object_indices->indices.size();
             filter_flying_objects(objects, object_indices, plane_cloud);
+            std::cout << " and after filtering: " << object_indices->indices.size() <<std::endl;
+
+            //check if objects are planar
+            std::cout << "Object indices size before filtering planar objects " << object_indices->indices.size();
+            filter_planar_objects(objects, object_indices);
             std::cout << " and after filtering: " << object_indices->indices.size() <<std::endl;
 
             if (object_indices->indices.size() > 0) {
@@ -469,6 +474,38 @@ void ExtractObjectsFromPlanes::filter_flying_objects(pcl::PointCloud<PointNormal
     ind->indices.erase(std::remove_if(std::begin(ind->indices),std::end(ind->indices),
                                       [&](int x){return find(std::begin(ind_to_be_removed),std::end(ind_to_be_removed),x)!=std::end(ind_to_be_removed);}), std::end(ind->indices) );
 }
+
+void ExtractObjectsFromPlanes::filter_planar_objects(pcl::PointCloud<PointNormal>::Ptr cloud, pcl::PointIndices::Ptr ind) {
+    // Create EuclideanClusterExtraction and set parameters
+    pcl::EuclideanClusterExtraction<PointNormal> ec;
+    std::vector<pcl::PointIndices> cluster_indices;
+    ec.setClusterTolerance (0.015);
+    ec.setMinClusterSize (15);
+    ec.setMaxClusterSize (std::numeric_limits<int>::max());
+    ec.setInputCloud (cloud);
+    ec.extract (cluster_indices);
+
+    std::vector<int> ind_to_be_removed;
+    int i = 0;
+    for (std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin (); it != cluster_indices.end (); ++it)
+    {
+        pcl::PointCloud<PointNormal>::Ptr cloud_cluster (new pcl::PointCloud<PointNormal>);
+        for (std::vector<int>::const_iterator pit = it->indices.begin (); pit != it->indices.end (); ++pit)
+            cloud_cluster->points.push_back (cloud->points[*pit]);
+        cloud_cluster->width = cloud_cluster->points.size ();
+        cloud_cluster->height = 1;
+        cloud_cluster->is_dense = true;
+
+        if (ObjectMatching::isObjectPlanar(cloud_cluster, 0.01, 0.9)) {
+            std::cerr << "Cluster is a plane. We remove it." << std::endl;
+            ind_to_be_removed.insert(std::end(ind_to_be_removed), std::begin(cluster_indices.at(i).indices), std::end(cluster_indices.at(i).indices));
+        }
+        i++;
+    }
+    ind->indices.erase(std::remove_if(std::begin(ind->indices),std::end(ind->indices),
+                                      [&](int x){return find(std::begin(ind_to_be_removed),std::end(ind_to_be_removed),x)!=std::end(ind_to_be_removed);}), std::end(ind->indices) );
+}
+
 
 void ExtractObjectsFromPlanes::shrinkConvexHull(pcl::PointCloud<PointNormal>::Ptr hull_cloud, float distance) {
     Eigen::Vector4f centroid4f; //last element is 1
