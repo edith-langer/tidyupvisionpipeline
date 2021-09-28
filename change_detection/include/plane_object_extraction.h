@@ -32,11 +32,6 @@ typedef pcl::PointXYZRGBNormal PointNormal;
 typedef pcl::PointXYZRGB PointRGB;
 
 
-struct PlaneWithObjInd {
-    PlaneStruct plane;
-    std::vector<int> obj_indices;
-};
-
 class ExtractObjectsFromPlanes {
 public:
     ExtractObjectsFromPlanes(pcl::PointCloud<PointNormal>::Ptr cloud, Eigen::Vector4f main_plane_coeffs, pcl::PointCloud<pcl::PointXYZ>::Ptr convex_hull_pts,

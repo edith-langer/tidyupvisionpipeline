@@ -1,6 +1,8 @@
 #ifndef MATHHELPERS_H
 #define MATHHELPERS_H
 
+#include "pcl/ModelCoefficients.h"
+
 
 struct PlaneStruct {
     pcl::PointIndices::Ptr plane_ind;
@@ -23,6 +25,11 @@ struct PlaneStruct {
         coeffs = boost::make_shared<pcl::ModelCoefficients>(*(rhs.coeffs));
         return *this;
     }
+};
+
+struct PlaneWithObjInd {
+    PlaneStruct plane;
+    std::vector<int> obj_indices;
 };
 
 #endif // MATHHELPERS_H
