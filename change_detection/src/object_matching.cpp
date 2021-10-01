@@ -300,8 +300,8 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
             ObjectMatching::clusterOutliersBySize(object_leftover, small_cluster_ind, 0.014, min_object_size);
             for (int i = small_cluster_ind.size() - 1; i >= 0; i--) {
                 object_leftover->points.erase(object_leftover->points.begin() + small_cluster_ind[i]);
-                object_leftover->width = object_leftover->points.size();
             }
+            object_leftover->width = object_leftover->points.size();
 
             //if the leftover is just a plane, remove it
             if (isObjectPlanar(object_leftover, 0.01, 0.9))
@@ -318,8 +318,8 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
             ObjectMatching::clusterOutliersBySize(model_leftover, small_cluster_ind, 0.014, min_object_size);
             for (int i = small_cluster_ind.size() - 1; i >= 0; i--) {
                 model_leftover->points.erase(model_leftover->points.begin() + small_cluster_ind[i]);
-                model_leftover->width = model_leftover->points.size();
             }
+            model_leftover->width = model_leftover->points.size();
 
             //if the leftover is just a plane, remove it
             if (isObjectPlanar(model_leftover, 0.01, 0.9))
@@ -401,7 +401,6 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
         ObjectMatching::clusterOutliersBySize(model_diff_cloud, small_cluster_ind, 0.014, min_object_size);
         for (int i = small_cluster_ind.size() - 1; i >= 0; i--) {
             model_diff_cloud->points.erase(model_diff_cloud->points.begin() + small_cluster_ind[i]);
-            model_diff_cloud->width = model_diff_cloud->points.size();
             diff_ind.erase(diff_ind.begin() + small_cluster_ind[i]);
         }
         model_diff_cloud->width = model_diff_cloud->points.size();
@@ -450,7 +449,6 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
         ObjectMatching::clusterOutliersBySize(object_diff_cloud, small_cluster_ind, 0.014, min_object_size);
         for (int i = small_cluster_ind.size() - 1; i >= 0; i--) {
             object_diff_cloud->points.erase(object_diff_cloud->points.begin() + small_cluster_ind[i]);
-            object_diff_cloud->width = object_diff_cloud->points.size();
             diff_ind.erase(diff_ind.begin() + small_cluster_ind[i]);
         }
         object_diff_cloud->width = object_diff_cloud->points.size();
