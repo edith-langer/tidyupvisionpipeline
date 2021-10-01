@@ -79,7 +79,6 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
     auto duration = std::chrono::duration_cast<std::chrono::minutes>(stop-start);
     std::cout << "Time to train the models " << duration.count() << " minutes" << std::endl;
 
-
     // use recognizer
     //---------------------------------------------------------------------------
     //std::vector<std::string> objects_to_look_for{};   // empty vector means look for all objects
@@ -138,6 +137,8 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
         pcl::io::savePCDFile(cloud_matches_dir + "/object.pcd", *object_vec_[i].getObjectCloud());
         // use results
         for (auto& hg : hypothesis_groups) {
+            FitnessScoreStruct best_fitness;
+            double best_score = 0.0;
             for (auto& h : hg.ohs_) {
 
                 //transform model
@@ -163,11 +164,17 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
                 FitnessScoreStruct fitness_score  = computeModelFitness(object_vec_[i].getObjectCloud(), model_aligned_refined, ppf_params);
 
                 //TODO: combined or max fitness score?
-                //h->confidence_ = (std::get<0>(obj_model_conf) + std::get<1>(obj_model_conf)) / 2;
-                h->confidence_ = std::max(fitness_score.object_conf, fitness_score.model_conf);
+                h->confidence_ = (fitness_score.object_conf + fitness_score.model_conf) / 2;
+                //h->confidence_ = std::min(fitness_score.object_conf, fitness_score.model_conf);
                 std::cout << "Confidence " << object_hypotheses.object_id << "-" << h->model_id_ << " " << h->confidence_ << std::endl;
 
-                std::string result_cloud_path = cloud_matches_dir + "/conf_" + std::to_string(h->confidence_)+ "_model_" + h->model_id_ + "_" +
+                if (h->confidence_ > best_score)
+                {
+                    best_score = h->confidence_;
+                    best_fitness = fitness_score;
+                }
+
+                std::string result_cloud_path = cloud_matches_dir + "/conf_" + std::to_string(fitness_score.object_conf) + "_" + std::to_string(fitness_score.model_conf) + "_model_" + h->model_id_ + "_" +
                         (ppf_params.ppf_rec_pipeline_.use_color_ ? "_color" : "");
                 saveCloudResults(object_vec_[i].getObjectCloud(), model_aligned, model_aligned_refined, result_cloud_path);
             }
@@ -175,10 +182,8 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
             // one hypothesis in group with best confidence score)
             std::sort(hg.ohs_.begin(), hg.ohs_.end(), [](const auto &a, const auto &b) { return a->confidence_ > b->confidence_; });
             hg.ohs_.resize(1);
-
+            object_hypotheses.model_fitness_map[hg.ohs_[0]->model_id_] = best_fitness;
         }
-        hypothesis_groups.erase(std::remove_if(hypothesis_groups.begin(),hypothesis_groups.end(), [](const auto &a){ return a.ohs_[0]->confidence_ < ppf_params.min_graph_conf_thr_ ; }), hypothesis_groups.end());
-
         if (hypothesis_groups.size() > 0 ) {
             object_hypotheses.hypotheses = hypothesis_groups;
             global_scene_hypotheses.push_back(object_hypotheses);
@@ -187,12 +192,80 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
         }
     }
 
-    //use bipartite graph to do the matching
+    /// first try to match single standing objects --> therefore used min_fitness_weight for confidence computation between two objects
+    /// if we find a match, we assume that the whole cluster is one object (because the confidence has to be high for both model and object)
+    /// remove hypothesis with a confidence lower than min_fitness_thr
+    std::vector<ObjectHypothesesStruct> single_obj_global_scene_hypotheses = global_scene_hypotheses;
+    for (size_t gh = 0; gh < single_obj_global_scene_hypotheses.size(); gh++) {
+        ObjectHypothesesStruct &ohs = single_obj_global_scene_hypotheses[gh];
+        ohs.hypotheses.erase(std::remove_if(ohs.hypotheses.begin(),ohs.hypotheses.end(), [&ohs](const auto &a){
+            FitnessScoreStruct fitness = ohs.model_fitness_map[a.ohs_[0]->model_id_];
+            double min_fitness = std::min(fitness.model_conf, fitness.object_conf);
+            return min_fitness < ppf_params.min_fitness_weight_thr_ ;
+        }), ohs.hypotheses.end());
+    }
+    std::vector<Match> model_obj_matches_single_standing = weightedGraphMatching(single_obj_global_scene_hypotheses);
+    std::vector<int> used_model_ids;
+    for (size_t m = 0; m < model_obj_matches_single_standing.size(); m++) {
+        Match &match = model_obj_matches_single_standing[m];
+        int obj_id = match.object_id;
+        int model_id = match.model_id;
+        std::vector<DetectedObject>::iterator co_iter = std::find_if( object_vec_.begin(), object_vec_.end(),[&obj_id](DetectedObject const &o) {return o.getID() == obj_id; });
+        std::vector<DetectedObject>::iterator ro_iter = std::find_if( model_vec_.begin(), model_vec_.end(),[&model_id](DetectedObject const &o) {return o.getID() == model_id; });
+
+        //compute distance between object and model
+        float dist = estimateDistance(co_iter->getObjectCloud(), ro_iter->getObjectCloud(), match.transform);
+        bool is_static = dist < max_dist_for_being_static;
+
+        ro_iter->match_ = match;
+        co_iter->match_ = match;
+        if (is_static) {
+            ro_iter->state_ = ObjectState::STATIC;
+            co_iter->state_ = ObjectState::STATIC;
+        } else {
+            ro_iter->state_ = ObjectState::DISPLACED;
+            co_iter->state_ = ObjectState::DISPLACED;
+        }
+
+        //delete hypothesis of object
+        global_scene_hypotheses.erase(std::remove_if(global_scene_hypotheses.begin(),global_scene_hypotheses.end(), [obj_id](const auto &a){ return a.object_id == obj_id ; }), global_scene_hypotheses.end());
+        used_model_ids.push_back(model_id);
+
+    }
+
+    //recompute fitness (avg instead of min) and check if model id was already matched
+    for (size_t gh = 0; gh < global_scene_hypotheses.size(); gh++) {
+        ObjectHypothesesStruct &ohs = global_scene_hypotheses[gh];
+        for (size_t h = 0; h < ohs.hypotheses.size(); h++) {
+            v4r::ObjectHypothesis::Ptr &oh = ohs.hypotheses[h].ohs_[0];
+            int h_model_id = std::stoi(oh->model_id_);
+            if (std::find(used_model_ids.begin(), used_model_ids.end(), h_model_id) != used_model_ids.end()) {
+                //model is already matched
+                oh->confidence_ = 0.0;
+            } else {
+                //recompute fitness using avarage value
+                FitnessScoreStruct fitness = ohs.model_fitness_map[oh->model_id_];
+                oh->confidence_ = (fitness.object_conf + fitness.model_conf) / 2;
+            }
+        }
+    }
+
+    //remove hypothesis with a confidence below threshold
+    for (size_t gh = 0; gh < global_scene_hypotheses.size(); gh++) {
+        ObjectHypothesesStruct &ohs = global_scene_hypotheses[gh];
+        ohs.hypotheses.erase(std::remove_if(ohs.hypotheses.begin(),ohs.hypotheses.end(), [](const auto &a){ return a.ohs_[0]->confidence_ < ppf_params.avg_fitness_weight_thr_ ; }), ohs.hypotheses.end());
+    }
+    global_scene_hypotheses.erase(std::remove_if(global_scene_hypotheses.begin(), global_scene_hypotheses.end(), [](const ObjectHypothesesStruct oh) {return oh.hypotheses.size() == 0; }), global_scene_hypotheses.end());
+
+
+
+    //now try to split clustered objects using bipartite graph in a loop
     //to be able to separate objects, do this as long as a result can be found
     std::map<int, pcl::PointCloud<PointNormal>::Ptr> model_id_cloud;
     for (size_t m = 0; m < model_vec_.size(); m++) {
         model_id_cloud.insert(std::make_pair(model_vec_[m].getID(), model_vec_[m].getObjectCloud()));
     }
+
 
     std::vector<Match> model_obj_matches;
     std::vector<Match> model_obj_matches_single_run = weightedGraphMatching(global_scene_hypotheses);
@@ -227,6 +300,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
             ObjectMatching::clusterOutliersBySize(object_leftover, small_cluster_ind, 0.014, min_object_size);
             for (int i = small_cluster_ind.size() - 1; i >= 0; i--) {
                 object_leftover->points.erase(object_leftover->points.begin() + small_cluster_ind[i]);
+                object_leftover->width = object_leftover->points.size();
             }
 
             //if the leftover is just a plane, remove it
@@ -244,6 +318,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
             ObjectMatching::clusterOutliersBySize(model_leftover, small_cluster_ind, 0.014, min_object_size);
             for (int i = small_cluster_ind.size() - 1; i >= 0; i--) {
                 model_leftover->points.erase(model_leftover->points.begin() + small_cluster_ind[i]);
+                model_leftover->width = model_leftover->points.size();
             }
 
             //if the leftover is just a plane, remove it
@@ -278,11 +353,11 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
                     pcl::transformPointCloudWithNormals(*(model_id_cloud.at(model_id)), *model_aligned_refined, oh->pose_refinement_ * oh->transform_);
                     FitnessScoreStruct fitness_score  = computeModelFitness(ohs.obj_pts_not_explained_cloud, model_aligned_refined, ppf_params);
                     //TODO: combined or max fitness score?
-                    //h->confidence_ = (std::get<0>(obj_model_conf) + std::get<1>(obj_model_conf)) / 2;
-                    oh->confidence_ = std::max(fitness_score.object_conf, fitness_score.model_conf);
+                    oh->confidence_ = (fitness_score.object_conf + fitness_score.model_conf) / 2;
+                    //oh->confidence_ = std::max(fitness_score.object_conf, fitness_score.model_conf);
                 }
             }
-            ohs.hypotheses.erase(std::remove_if(ohs.hypotheses.begin(),ohs.hypotheses.end(), [](const auto &a){ return a.ohs_[0]->confidence_ < ppf_params.min_graph_conf_thr_ ; }), ohs.hypotheses.end());
+            ohs.hypotheses.erase(std::remove_if(ohs.hypotheses.begin(),ohs.hypotheses.end(), [](const auto &a){ return a.ohs_[0]->confidence_ < ppf_params.avg_fitness_weight_thr_ ; }), ohs.hypotheses.end());
         }
         global_scene_hypotheses.erase(std::remove_if(global_scene_hypotheses.begin(), global_scene_hypotheses.end(), [](const ObjectHypothesesStruct oh) {return oh.hypotheses.size() == 0; }), global_scene_hypotheses.end());
 
@@ -293,7 +368,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
         //build a new graph with the remaining ones
         model_obj_matches_single_run = weightedGraphMatching(global_scene_hypotheses);
     }
-    model_obj_matches.erase(std::remove_if(model_obj_matches.begin(),model_obj_matches.end(), [](const auto &a){ return a.confidence < ppf_params.min_result_conf_thr_ ; }), model_obj_matches.end());
+    model_obj_matches.erase(std::remove_if(model_obj_matches.begin(),model_obj_matches.end(), [](const auto &a){ return a.confidence < ppf_params.avg_fitness_weight_thr_ ; }), model_obj_matches.end());
 
     std::cout << "Time spent to recognize objects with PPF: " << (ppf_rec_time_sum/1000) << " seconds." << std::endl;
 
@@ -326,6 +401,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
         ObjectMatching::clusterOutliersBySize(model_diff_cloud, small_cluster_ind, 0.014, min_object_size);
         for (int i = small_cluster_ind.size() - 1; i >= 0; i--) {
             model_diff_cloud->points.erase(model_diff_cloud->points.begin() + small_cluster_ind[i]);
+            model_diff_cloud->width = model_diff_cloud->points.size();
             diff_ind.erase(diff_ind.begin() + small_cluster_ind[i]);
         }
         model_diff_cloud->width = model_diff_cloud->points.size();
@@ -374,6 +450,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
         ObjectMatching::clusterOutliersBySize(object_diff_cloud, small_cluster_ind, 0.014, min_object_size);
         for (int i = small_cluster_ind.size() - 1; i >= 0; i--) {
             object_diff_cloud->points.erase(object_diff_cloud->points.begin() + small_cluster_ind[i]);
+            object_diff_cloud->width = object_diff_cloud->points.size();
             diff_ind.erase(diff_ind.begin() + small_cluster_ind[i]);
         }
         object_diff_cloud->width = object_diff_cloud->points.size();
@@ -408,13 +485,13 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
             co_iter->match_ = match;
             co_iter->object_folder_path_="";
 
-            //we add the diff_object_part later to the model_vec because it invalidates the vector
+            //we add the diff_object_part later to the object_vec because it invalidates the vector
 
             //save the new partly matched object
             boost::filesystem::path model_path_orig(model_path_);
             std::string cloud_matches_dir =  model_path_orig.remove_trailing_separator().parent_path().string() + "/matches/object" + std::to_string(match.object_id) + "_part_match";
             boost::filesystem::create_directories(cloud_matches_dir);
-            std::string result_cloud_path = cloud_matches_dir + "/conf_" + std::to_string(match.confidence)+ "_model_" + std::to_string(match.model_id) + "_" +
+            std::string result_cloud_path = cloud_matches_dir + "/conf_" + std::to_string(match.fitness_score.object_conf) + "_" + std::to_string(match.fitness_score.model_conf) + "_model_" + std::to_string(match.model_id) + "_" +
                     (ppf_params.ppf_rec_pipeline_.use_color_ ? "_color" : "");
             saveCloudResults(matched_object_part, model_aligned, model_aligned, result_cloud_path); //we don't have access to the not refined model
 
@@ -436,7 +513,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
         //ATTENTION: The ro_iter is invalid now because of the push_back. Vector re-allocates and invalidates pointers
         if (model_diff_cloud->size() > 0) {
             //the remaining part of the model
-            DetectedObject diff_model_part(model_diff_cloud, ro_iter->plane_cloud_, ro_iter->supp_plane_, ObjectState::REMOVED, "");
+            DetectedObject diff_model_part(model_diff_cloud, ro_iter->plane_cloud_, ObjectState::REMOVED, "");
 
             //update matches with the new ID! Except for co_iter
             for (size_t k = 0; k < model_obj_matches.size(); k++) {
@@ -450,7 +527,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
         //ATTENTION: The co_iter is invalid now because of the push_back. Vector re-allocates and invalidates pointers
         if (object_diff_cloud->size() > 0) {
             //the remaining part of the object
-            DetectedObject diff_object_part(object_diff_cloud, co_iter->plane_cloud_, co_iter->supp_plane_, ObjectState::NEW, "");
+            DetectedObject diff_object_part(object_diff_cloud, co_iter->plane_cloud_, ObjectState::NEW, "");
 
             //update matches with the new ID! Except for co_iter
             for (size_t k = 0; k < model_obj_matches.size(); k++) {
@@ -480,6 +557,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
         ref_result.push_back(ro);
     }
 
+    model_obj_matches.insert(model_obj_matches.end(), model_obj_matches_single_standing.begin(), model_obj_matches_single_standing.end());
     return model_obj_matches;
 }
 
