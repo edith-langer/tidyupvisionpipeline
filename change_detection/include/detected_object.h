@@ -49,18 +49,17 @@ public:
     DetectedObject(){}
 
     DetectedObject(pcl::PointCloud<PointNormal>::Ptr object_cloud, pcl::PointCloud<PointNormal>::Ptr plane_cloud,
-                   PlaneStruct supp_plane, ObjectState object_state = UNKNOWN, std::string object_folder_path = "") : unique_id_(++s_id), object_cloud_(object_cloud),
-        plane_cloud_(plane_cloud), supp_plane_(supp_plane), state_(object_state), object_folder_path_(object_folder_path) {
+                   ObjectState object_state = UNKNOWN, std::string object_folder_path = "") : unique_id_(++s_id), object_cloud_(object_cloud),
+        plane_cloud_(plane_cloud), state_(object_state), object_folder_path_(object_folder_path) {
         std::vector<int> nan_ind;
         pcl::removeNaNFromPointCloud(*object_cloud_, *object_cloud_, nan_ind);
     }
 
-    Match match_; //this is only relevant for displaced objects
     pcl::PointCloud<PointNormal>::Ptr plane_cloud_;
-    PlaneStruct supp_plane_;
     std::string object_folder_path_;
     ObjectState state_;
     std::unordered_set<int> already_checked_model_ids;
+    Match match_; //this is only relevant for displaced objects
 
     int getID() const {return unique_id_;}
     void setObjectCloud(pcl::PointCloud<PointNormal>::Ptr object_cloud) {

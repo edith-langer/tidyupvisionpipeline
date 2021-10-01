@@ -75,6 +75,7 @@ struct ObjectHypothesesStruct {
     pcl::PointCloud<PointNormal>::Ptr object_cloud;
     pcl::PointCloud<PointNormal>::Ptr obj_pts_not_explained_cloud;
     std::vector<v4r::ObjectHypothesesGroup> hypotheses; //return value of the recognize-method: each element contains the hypothesis for a model
+    std::map<std::string, FitnessScoreStruct> model_fitness_map; //store for each model hypotheses the fitness
 };
 
 

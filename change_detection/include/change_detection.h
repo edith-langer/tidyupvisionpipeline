@@ -68,6 +68,7 @@ public:
     void compute(std::vector<DetectedObject> &ref_result, std::vector<DetectedObject> &curr_result);
     static pcl::PointCloud<PointNormal>::Ptr downsampleCloud(pcl::PointCloud<PointNormal>::Ptr input, double leafSize);
     static void mergeObjectParts(std::vector<DetectedObject> &detected_objects, std::string merge_object_parts_folder);
+    static void filterSmallVolumes(std::vector<DetectedObject> &objects, double volume_thr, int min_obj_size=0);
 
 private:
     //std::string object_store_path_; //the model objects and their ppf model get stored here --> for now we store everything in output path
@@ -109,7 +110,7 @@ private:
     DetectedObject fromPlaneIndObjToDetectedObject (pcl::PointCloud<PointNormal>::Ptr curr_cloud, PlaneWithObjInd obj);
     int checkVerticalPlanarity(PlaneWithObjInd& object, pcl::PointCloud<PointNormal>::Ptr cloud, float _plane_dist_thr);
     void filterVerticalPlanes(std::vector<PlaneWithObjInd>& objects, pcl::PointCloud<PointNormal>::Ptr cloud, std::string path, float _plane_dist_thr=0.005);
-    void filterSmallVolumes(std::vector<DetectedObject> &objects, double volume_thr);
+
 };
 
 #endif // CHANGE_DETECTION_H

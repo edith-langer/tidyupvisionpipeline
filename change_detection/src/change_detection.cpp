@@ -2,9 +2,10 @@
 
 int DetectedObject::s_id = 0;
 
-double ds_leaf_size = 0.01;
+double ds_leaf_size_LV = 0.01;
+double ds_leaf_size_ppf = 0.005;
 
-const float diff_dist = ds_leaf_size * std::sqrt(2);
+const float diff_dist = ds_leaf_size_LV * std::sqrt(2);
 const float add_crop_static = 0.10; //the amount that should be added to each cluster in the static version when doing the crop
 const float icp_max_corr_dist = 0.15;
 const float icp_max_corr_dist_plane = 0.05;
@@ -60,8 +61,8 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
     //----------------------------downsample input clouds for faster computation-------
     pcl::PointCloud<PointNormal>::Ptr curr_cloud_downsampled (new pcl::PointCloud<PointNormal>);
     pcl::PointCloud<PointNormal>::Ptr ref_cloud_downsampled (new pcl::PointCloud<PointNormal>);
-    curr_cloud_downsampled = downsampleCloud(curr_cloud_, ds_leaf_size);
-    ref_cloud_downsampled = downsampleCloud(ref_cloud_, ds_leaf_size);
+    curr_cloud_downsampled = downsampleCloud(curr_cloud_, ds_leaf_size_LV);
+    ref_cloud_downsampled = downsampleCloud(ref_cloud_, ds_leaf_size_LV);
 
     //---------------------------------------------------------------------------------
 
@@ -401,7 +402,7 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
         pcl::PointCloud<PointNormal>::Ptr  novel_objects_cloud = fromObjectVecToObjectCloud(curr_objects, curr_cloud_downsampled);
         pcl::io::savePCDFileBinary(curr_res_path + "/result_after_filtering_planar_objects.pcd", *novel_objects_cloud);
         //----------------Upsample again to have the objects and planes in full resolution----------
-        upsampleObjectsAndPlanes(curr_cloud_, curr_cloud_downsampled, curr_objects, ds_leaf_size, curr_res_path);
+        upsampleObjectsAndPlanes(curr_cloud_, curr_cloud_downsampled, curr_objects, ds_leaf_size_LV, curr_res_path);
         novel_objects_cloud = fromObjectVecToObjectCloud(curr_objects, curr_cloud_);
         pcl::io::savePCDFileBinary(curr_res_path + "/eval_sem_plane_final_orig.pcd", *novel_objects_cloud);
 
@@ -419,7 +420,7 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
         pcl::PointCloud<PointNormal>::Ptr disappeared_objects_cloud = fromObjectVecToObjectCloud(ref_objects, ref_cloud_downsampled);
         pcl::io::savePCDFileBinary(ref_res_path + "/result_after_filtering_planar_objects.pcd", *disappeared_objects_cloud);
         //----------------Upsample again to have the objects and planes in full resolution----------
-        upsampleObjectsAndPlanes(ref_cloud_, ref_cloud_downsampled, ref_objects, ds_leaf_size, ref_res_path);
+        upsampleObjectsAndPlanes(ref_cloud_, ref_cloud_downsampled, ref_objects, ds_leaf_size_LV, ref_res_path);
         disappeared_objects_cloud = fromObjectVecToObjectCloud(ref_objects, ref_cloud_);
         pcl::io::savePCDFileBinary(ref_res_path + "/eval_sem_plane_final_orig.pcd", *disappeared_objects_cloud);
 
@@ -430,7 +431,7 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
     }
 
     pcl::octree::OctreePointCloudSearch<PointNormal>::Ptr octree;
-    octree.reset(new pcl::octree::OctreePointCloudSearch<PointNormal>(ds_leaf_size));
+    octree.reset(new pcl::octree::OctreePointCloudSearch<PointNormal>(ds_leaf_size_LV));
     //also upsample static objects if LV was performed
     if (ref_obj_static.size() > 0) {
         octree->setInputCloud(ref_cloud_);
@@ -444,7 +445,7 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
         pcl::io::savePCDFileBinary(ref_res_path + "/ref_static_cloud.pcd", *ref_static_cloud);
     }
     if (curr_obj_static.size() > 0) {
-        octree.reset(new pcl::octree::OctreePointCloudSearch<PointNormal>(ds_leaf_size));
+        octree.reset(new pcl::octree::OctreePointCloudSearch<PointNormal>(ds_leaf_size_LV));
         octree->setInputCloud(curr_cloud_);
         octree->addPointsFromInputCloud();
     }
@@ -468,25 +469,28 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
 
 
 
-
     //------------------Match detected objects against each other with PPF-----------------------
     //depending on if LV was performed before, static objects can be matched
     std::string debug_model_path = output_path_ + "/model_objects/";
     std::vector<DetectedObject> ref_objects_vec;
     for (size_t o = 0; o < ref_objects.size(); o++) {
         DetectedObject obj = fromPlaneIndObjToDetectedObject(ref_cloud_, ref_objects[o]);
+        refineNormals(obj.getObjectCloud());
+        /// because surfels in EF recos are not evently distributed, we downsample again to get a similar resolution for all objects and be able to filter by nr of points
+        obj.setObjectCloud(downsampleCloud(obj.getObjectCloud(), ds_leaf_size_ppf));
 
         std::string debug_obj_folder = debug_model_path + std::to_string(obj.getID()); //PPF uses the folder name as model_id!
         boost::filesystem::create_directories(debug_obj_folder);
         std::string obj_folder = ppf_model_path_ + std::to_string(obj.getID()); //PPF uses the folder name as model_id!
         boost::filesystem::create_directories(obj_folder);
         pcl::io::savePCDFile(debug_obj_folder + "/3D_model.pcd", *(obj.getObjectCloud())); //each detected reference object is saved in a folder for further use with PPF
+        pcl::io::savePCDFileBinary(debug_obj_folder + "/plane.pcd", *(obj.plane_cloud_));
         pcl::io::savePCDFile(obj_folder + "/3D_model.pcd", *(obj.getObjectCloud()));
         obj.object_folder_path_ = obj_folder;
         ref_objects_vec.push_back(obj);
     }
 
-    filterSmallVolumes(ref_objects_vec, min_object_volume); //0.05^3
+    filterSmallVolumes(ref_objects_vec, min_object_volume, min_object_size); //0.05^3
 
     if (curr_objects.size() == 0) { //all objects removed from ref scene
         for (size_t i = 0; i < ref_objects_vec.size(); i++) {
@@ -505,14 +509,18 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
     for (size_t o = 0; o < curr_objects.size(); o++) {
 
         DetectedObject obj = fromPlaneIndObjToDetectedObject(curr_cloud_, curr_objects[o]);
+        refineNormals(obj.getObjectCloud());
+        /// because surfels in EF recos are not evently distributed, we downsample again to get a similar resolution for all objects and be able to filter by nr of points
+        obj.setObjectCloud(downsampleCloud(obj.getObjectCloud(), ds_leaf_size_ppf));
         curr_objects_vec.push_back(obj);
 
         std::string debug_obj_folder = output_path_ + "/current_det_objects/" + std::to_string(obj.getID());
         boost::filesystem::create_directories(debug_obj_folder);
         pcl::io::savePCDFileBinary(debug_obj_folder + "/object.pcd", *(obj.getObjectCloud()));
+        pcl::io::savePCDFileBinary(debug_obj_folder + "/plane.pcd", *(obj.plane_cloud_));
     }
 
-    filterSmallVolumes(curr_objects_vec, min_object_volume);
+    filterSmallVolumes(curr_objects_vec, min_object_volume, min_object_size);
 
     if (ref_objects.size() == 0) { //all objects are new in curr
         for (size_t i = 0; i < curr_objects_vec.size(); i++) {
@@ -529,8 +537,8 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
     mergeObjectParts(ref_result, merge_object_parts_path_);
     mergeObjectParts(curr_result, merge_object_parts_path_);
 
-    filterSmallVolumes(ref_result, min_object_volume);
-    filterSmallVolumes(curr_result, min_object_volume);
+    filterSmallVolumes(ref_result, min_object_volume, min_object_size);
+    filterSmallVolumes(curr_result, min_object_volume, min_object_size);
 
     //matches between same plane different timestamps
     ObjectMatching object_matching(ref_objects_vec, curr_objects_vec, ppf_model_path_, ppf_config_path_);
@@ -541,8 +549,8 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
     curr_result.insert(curr_result.end(), curr_obj_static.begin(), curr_obj_static.end());
     mergeObjectParts(ref_result, merge_object_parts_path_);
     mergeObjectParts(curr_result, merge_object_parts_path_);
-    filterSmallVolumes(ref_result, min_object_volume);
-    filterSmallVolumes(curr_result, min_object_volume);
+    filterSmallVolumes(ref_result, min_object_volume, min_object_size);
+    filterSmallVolumes(curr_result, min_object_volume, min_object_size);
 }
 
 // v4r/common/Downsampler.cpp has a more advanced method if normals are given
@@ -1249,13 +1257,15 @@ void ChangeDetection::mergeObjectParts(std::vector<DetectedObject> &detected_obj
                     extract.setKeepOrganized(false);
                     extract.filter(*detected_objects[i].getObjectCloud());
 
-                    if (ObjectMatching::isObjectPlanar(detected_objects[i].getObjectCloud(), 0.01, 0.9))
+                    if (ObjectMatching::isObjectPlanar(detected_objects[i].getObjectCloud(), 0.01, 0.9)) {
                         *detected_objects[j].getObjectCloud() += *detected_objects[i].getObjectCloud();
+                        detected_objects[i].getObjectCloud()->clear();
+                    }
 
                     if (!detected_objects[j].getObjectCloud()->empty())
-                        pcl::io::savePCDFileBinary(path + "/after_merging"+ std::to_string(detected_objects[j].getID()) + ".pcd", *detected_objects[j].getObjectCloud());
+                        pcl::io::savePCDFileBinary(path + "/after_merging_cleaning"+ std::to_string(detected_objects[j].getID()) + ".pcd", *detected_objects[j].getObjectCloud());
                     if (!detected_objects[i].getObjectCloud()->empty())
-                        pcl::io::savePCDFileBinary(path + "/after_merging"+ std::to_string(detected_objects[i].getID()) + ".pcd", *detected_objects[i].getObjectCloud());
+                        pcl::io::savePCDFileBinary(path + "/after_merging_cleaning"+ std::to_string(detected_objects[i].getID()) + ".pcd", *detected_objects[i].getObjectCloud());
                 }
             }
         }
@@ -1393,7 +1403,7 @@ void ChangeDetection::matchAndRemoveObjects (pcl::PointCloud<PointNormal>::Ptr r
         //check color
         v4r::apps::PPFRecognizerParameter params;
         FitnessScoreStruct fitness_score = ObjectMatching::computeModelFitness(object_registered, remaining_cloud_crop, params);
-        if (fitness_score.object_conf > ppf_params.min_result_conf_thr_) {
+        if (fitness_score.object_conf > ppf_params.min_fitness_weight_thr_) {
             obj_iter = extracted_objects.erase(obj_iter);
         }
         else {
@@ -1418,25 +1428,29 @@ DetectedObject ChangeDetection::fromPlaneIndObjToDetectedObject (pcl::PointCloud
     extract.setIndices(obj_ind);
     extract.filter(*object_cloud);
 
-    DetectedObject det_obj(object_cloud, plane_cloud, obj.plane);
+    DetectedObject det_obj(object_cloud, plane_cloud);
 
     return det_obj;
 }
 
-void ChangeDetection::filterSmallVolumes(std::vector<DetectedObject> &objects, double volume_thr) {
+void ChangeDetection::filterSmallVolumes(std::vector<DetectedObject> &objects, double volume_thr, int min_obj_size) {
     std::vector<int> filtered_ind;
     for (size_t i = 0;  i < objects.size(); i++) {
-        pcl::PointCloud<PointNormal>::Ptr cloud_hull (new pcl::PointCloud<PointNormal>);
-        pcl::ConvexHull<PointNormal> chull;
-        chull.setInputCloud (objects[i].getObjectCloud());
-        chull.setDimension(3);
-        chull.setComputeAreaVolume(true);
-        chull.reconstruct (*cloud_hull);
-        double volume = chull.getTotalVolume();
-        if (volume < volume_thr) {
-            //remove flat object
-            std::cout << "Too little volume: " << objects[i].getID() << std::endl;
+        if (objects[i].getObjectCloud()->size() < min_obj_size) {
             filtered_ind.push_back((i));
+        } else {
+            pcl::PointCloud<PointNormal>::Ptr cloud_hull (new pcl::PointCloud<PointNormal>);
+            pcl::ConvexHull<PointNormal> chull;
+            chull.setInputCloud (objects[i].getObjectCloud());
+            chull.setDimension(3);
+            chull.setComputeAreaVolume(true);
+            chull.reconstruct (*cloud_hull);
+            double volume = chull.getTotalVolume();
+            if (volume < volume_thr) {
+                //remove flat object
+                std::cout << "Too little volume: " << objects[i].getID() << std::endl;
+                filtered_ind.push_back((i));
+            }
         }
     }
     for (int i = filtered_ind.size()-1; i >= 0; --i) {
