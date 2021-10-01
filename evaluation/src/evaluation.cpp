@@ -23,9 +23,8 @@
 #include <pcl/filters/filter.h>
 #include <pcl/segmentation/extract_clusters.h>
 #include <pcl/filters/extract_indices.h>
+#include <pcl/filters/voxel_grid.h>
 
-typedef pcl::PointXYZRGBNormal PointNormal;
-typedef pcl::PointXYZRGB PointRGB;
 typedef pcl::PointXYZRGBL PointLabel;
 
 const float max_dist_for_being_static = 0.1; //how much can the object be displaced to still count as static
@@ -33,6 +32,7 @@ float search_radius = 0.01;
 float cluster_thr = 0.02;
 int min_cluster_size = 100;
 
+double ds_voxel_size = 0.005;
 
 std::string anno_file_name = "merged_plane_clouds_ds002";
 
@@ -89,6 +89,7 @@ void writeSumResultsToFile(std::vector<Measurements> all_gt_results, std::vector
 int extractDetectedObjects(std::vector<GTObject> gt_objects, pcl::PointCloud<PointLabel>::Ptr result_cloud, std::map<std::string, int> &gt_obj_count, std::map<std::string, int> &det_obj_count);
 void writeObjectSummaryToFile(std::map<std::string, int> & gt_obj_count, std::map<std::string, int> & det_obj_count, std::map<std::string, int> &tp_class_obj_count, std::string path);
 int computeStaticFP(std::map<std::string, pcl::PointCloud<PointLabel>::Ptr> obj_name_cloud_map, pcl::PointCloud<PointLabel>::Ptr static_leftover_cloud);
+pcl::PointCloud<PointLabel>::Ptr downsampleCloud(pcl::PointCloud<PointLabel>::Ptr input, double leafSize);
 
 std::ostream& operator<<(std::ostream& output, Measurements const& m)
 {
@@ -354,6 +355,15 @@ int main(int argc, char* argv[])
         GTLabeledClouds gt_labeled_clouds;
         gt_labeled_clouds.ref_GT_cloud = ref_GT_cloud;
         gt_labeled_clouds.curr_GT_cloud = curr_GT_cloud;
+
+        //we downsample the GT clouds accordingly to the leaf size used to create the results
+        gt_labeled_clouds.ref_GT_cloud = downsampleCloud(gt_labeled_clouds.ref_GT_cloud, ds_voxel_size);
+        gt_labeled_clouds.curr_GT_cloud = downsampleCloud(gt_labeled_clouds.curr_GT_cloud, ds_voxel_size);
+        for (GTObject& o : ref_gt_objects)
+            o.object_cloud = downsampleCloud(o.object_cloud, ds_voxel_size);
+        for (GTObject& o : curr_gt_objects)
+            o.object_cloud = downsampleCloud(o.object_cloud, ds_voxel_size);
+
         GTCloudsAndNumbers gt_cloud_numbers;
         gt_cloud_numbers.clouds = gt_labeled_clouds;
         gt_cloud_numbers.m = gt_measurements;
@@ -605,11 +615,15 @@ int main(int argc, char* argv[])
         *curr_result_cloud += *c_moved_obj_cloud;
         *curr_result_cloud += *c_static_obj_cloud;
         *curr_result_cloud += *novel_obj_cloud;
+        if (!curr_result_cloud->empty())
+            pcl::io::savePCDFileBinary( scene_comp.result_path+"/curr_result_cloud.pcd", *curr_result_cloud);
         result.nr_det_obj = extractDetectedObjects(gt_cloud_numbers.curr_objects, curr_result_cloud, gt_obj_count_comp, det_obj_count_comp);
         pcl::PointCloud<PointLabel>::Ptr ref_result_cloud(new pcl::PointCloud<PointLabel>());
         *ref_result_cloud += *r_moved_obj_cloud;
         *ref_result_cloud += *r_static_obj_cloud;
         *ref_result_cloud += *removed_obj_cloud;
+        if (!ref_result_cloud->empty())
+            pcl::io::savePCDFileBinary( scene_comp.result_path+"/ref_result_cloud.pcd", *ref_result_cloud);
         result.nr_det_obj += extractDetectedObjects(gt_cloud_numbers.ref_objects, ref_result_cloud, gt_obj_count_comp, det_obj_count_comp);
 
         std::cout << scene_comp.ref_scene + "-" + scene_comp.curr_scene << std::endl;
@@ -742,7 +756,7 @@ int computeStaticFP(std::map<std::string, pcl::PointCloud<PointLabel>::Ptr> obj_
     return fp;
 }
 
-//an object counts as detected if > 50 % of it were detected
+//an object counts as detected if > 50 % of it was detected
 int extractDetectedObjects(std::vector<GTObject> gt_objects, pcl::PointCloud<PointLabel>::Ptr result_cloud,
                            std::map<std::string, int> & gt_obj_count, std::map<std::string, int> & det_obj_count) {
     int nr_det_obj = 0;
@@ -755,7 +769,7 @@ int extractDetectedObjects(std::vector<GTObject> gt_objects, pcl::PointCloud<Poi
         pcl::PointCloud<PointLabel>::Ptr gt_cloud = gt_obj.object_cloud;
         overlapping_ind.clear();
         for (const PointLabel p : gt_cloud->points) {
-            if (tree->radiusSearch(p, 0.005, nn_indices, nn_distances) > 0) {
+            if (tree->radiusSearch(p, 0.01, nn_indices, nn_distances) > 0) {
                 overlapping_ind.insert(overlapping_ind.begin(), nn_indices.begin(), nn_indices.end());
             }
         }
@@ -856,4 +870,20 @@ int getMostFrequentNumber(std::vector<int> v) {
         }
     }
     return mostElement;
+}
+
+pcl::PointCloud<PointLabel>::Ptr downsampleCloud(pcl::PointCloud<PointLabel>::Ptr input, double leafSize)
+{
+    std::cout << "PointCloud before filtering has: " << input->points.size () << " data points." << std::endl;
+
+    // Create the filtering object: downsample the dataset using a leaf size
+    pcl::VoxelGrid<PointLabel> vg;
+    pcl::PointCloud<PointLabel>::Ptr cloud_filtered (new pcl::PointCloud<PointLabel>);
+    vg.setInputCloud (input);
+    vg.setLeafSize (leafSize, leafSize, leafSize);
+    vg.setDownsampleAllData(true);
+    vg.filter (*cloud_filtered);
+    std::cout << "PointCloud after filtering has: " << cloud_filtered->points.size ()  << " data points." << std::endl;
+
+    return cloud_filtered;
 }
