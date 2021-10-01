@@ -129,27 +129,16 @@ void Model<PointT>::initialize(const bf::path &model_filename, const NormalEstim
 
   /// 3D model exists
   else {
-      pcl::PointCloud<pcl::Normal>::Ptr normals = computeNormals<PointTWithNormal>(all_assembled, ne_param);
-
       pcl::PCLPointCloud2* header = new pcl::PCLPointCloud2;
       pcl::PCDReader reader;
       reader.readHeader(model_filename.string(), *header);
       if(std::find_if(header->fields.begin(), header->fields.end(), [](const pcl::PCLPointField & field) {
                       return field.name.find("normal") != std::string::npos;
-  }) != header->fields.end()) {
-          //model has already normals, refine them with the computed normals
-          for (size_t p = 0; p < all_assembled->size(); p++) {
-              const auto normal_pre = all_assembled->at(p).getNormalVector4fMap();
-              const auto normal_comp = normals->at(p).getNormalVector4fMap();
-              float normals_dotp = normal_comp.dot(normal_pre);
-              if (normals_dotp < 0) { //negative dot product = angle between the two normals is between 90 and 270 deg
-                  normals->at(p).normal_x *= -1;
-                  normals->at(p).normal_y *= -1;
-                  normals->at(p).normal_z *= -1;
-              }
-          }
+  }) == header->fields.end()) {
+          //model has no normals
+          pcl::PointCloud<pcl::Normal>::Ptr normals = computeNormals<PointTWithNormal>(all_assembled, ne_param);
+          pcl::concatenateFields(*all_assembled, *normals, *all_assembled);
       }
-      pcl::concatenateFields(*all_assembled, *normals, *all_assembled);
   }
 
   all_assembled_ = all_assembled;
