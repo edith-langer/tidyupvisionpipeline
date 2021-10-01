@@ -133,8 +133,10 @@ struct PPFRecognizerParameter {
   float max_model_diameter_to_min_plane_ratio_ =
       1.2f;  ///< multiplier for max model diameter used to compute plane removal size threshold
 
-  double min_graph_conf_thr_ = 0.2;
-  double min_result_conf_thr_ = 0.75;
+  //double min_graph_conf_thr_ = 0.2;
+  //double min_result_conf_thr_ = 0.75;
+  double min_fitness_weight_thr_ = 0.6;
+  double avg_fitness_weight_thr_ = 0.8;
 
   PPFRecognizerParameter() : cam_(new Intrinsics) {}
 

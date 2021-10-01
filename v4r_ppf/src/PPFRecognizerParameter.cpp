@@ -68,11 +68,17 @@ void PPFRecognizerParameter::init(boost::program_options::options_description &d
                      "ICP parameter: terminate if difference between the previous transformation and the current estimated transformation is smaller. Only used if hypotheses are not verified. Otherwise ICP is done inside HV");
   desc.add_options()("skip_verification", po::bool_switch(&skip_verification_),
                      "if true, skips verification (only hypotheses generation)");
-  desc.add_options()("min_graph_conf_thr",
-                     po::value<double>(&min_graph_conf_thr_)->default_value(min_graph_conf_thr_),
+//  desc.add_options()("min_graph_conf_thr",
+//                     po::value<double>(&min_graph_conf_thr_)->default_value(min_graph_conf_thr_),
+//                     "If the confidence is below that value, the hypothesis gets rejected");
+//  desc.add_options()("min_result_conf_thr",
+//                     po::value<double>(&min_result_conf_thr_)->default_value(min_result_conf_thr_),
+//                     "If the confidence is below that value, the hypothesis gets rejected");
+  desc.add_options()("min_fitness_weight_thr",
+                     po::value<double>(&min_fitness_weight_thr_)->default_value(min_fitness_weight_thr_),
                      "If the confidence is below that value, the hypothesis gets rejected");
-  desc.add_options()("min_result_conf_thr",
-                     po::value<double>(&min_result_conf_thr_)->default_value(min_result_conf_thr_),
+  desc.add_options()("avg_fitness_weight_thr",
+                     po::value<double>(&avg_fitness_weight_thr_)->default_value(avg_fitness_weight_thr_),
                      "If the confidence is below that value, the hypothesis gets rejected");
 
   normal_estimator_param_.init(desc, section_name + ".normal_estimator");
