@@ -59,24 +59,35 @@ struct VertexProperty {
     VertexProperty(){}
 };
 
-//we use that to store the transformation from object to model as edge property
-struct transformation_t {typedef boost::edge_property_tag kind;};
-typedef boost::property<transformation_t, Eigen::Matrix4f > Transformnation_e_prop;
+struct HypothesesStruct {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
-typedef boost::property< boost::edge_weight_t, float, Transformnation_e_prop > EdgeProperty;
+    HypothesesStruct() {}
+    HypothesesStruct(int id, pcl::PointCloud<PointNormal>::Ptr cloud, Eigen::Matrix4f transf, FitnessScoreStruct fitness_score) :
+        model_id(id), transform(transf), fitness(fitness_score) {}
+    int model_id;
+    Eigen::Matrix<float,4,4,Eigen::DontAlign> transform;  ///< 4x4 homogenous transformation to project model into camera coordinate system.
+    FitnessScoreStruct fitness;
+};
+
+struct ObjectHypothesesStruct {
+    int object_id;
+    pcl::PointCloud<PointNormal>::Ptr object_cloud;
+    std::map<int, HypothesesStruct> model_hyp; //store for each model hypotheses the fitness
+};
+
+//we use that to store the transformation from object to model as edge property
+struct hypo_t {typedef boost::edge_property_tag kind;};
+typedef boost::property<hypo_t, HypothesesStruct > hypo_e_prop;
+
+typedef boost::property< boost::edge_weight_t, float, hypo_e_prop > EdgeProperty;
 typedef boost::adjacency_list< boost::vecS, boost::vecS, boost::undirectedS, VertexProperty, EdgeProperty > my_graph;
 
 using vertex_t = boost::graph_traits<my_graph>::vertex_descriptor;
 using edge_t   = boost::graph_traits<my_graph>::edge_descriptor;
 
 
-struct ObjectHypothesesStruct {
-    int object_id;
-    pcl::PointCloud<PointNormal>::Ptr object_cloud;
-    pcl::PointCloud<PointNormal>::Ptr obj_pts_not_explained_cloud;
-    std::vector<v4r::ObjectHypothesesGroup> hypotheses; //return value of the recognize-method: each element contains the hypothesis for a model
-    std::map<std::string, FitnessScoreStruct> model_fitness_map; //store for each model hypotheses the fitness
-};
+
 
 
 class ObjectMatching
@@ -100,10 +111,15 @@ private:
     std::string model_path_;
     std::string cfg_path_;
 
-    void saveCloudResults(pcl::PointCloud<PointNormal>::Ptr object_cloud, pcl::PointCloud<PointNormal>::Ptr model_aligned,
-                          pcl::PointCloud<PointNormal>::Ptr model_aligned_refined, std::string path);
+    boost::shared_ptr<v4r::apps::PPFRecognizer<pcl::PointXYZRGB> > rec_;
+
+    void saveCloudResults(pcl::PointCloud<PointNormal>::Ptr object_cloud, pcl::PointCloud<PointNormal>::Ptr model_aligned, std::string path);
     bool isBelowPlane(pcl::PointCloud<PointNormal>::Ptr model, pcl::PointCloud<PointNormal>::Ptr plane_cloud);
-    std::vector<Match> weightedGraphMatching(std::vector<ObjectHypothesesStruct> global_hypotheses);
+    std::vector<Match> weightedGraphMatching(std::vector<ObjectHypothesesStruct> global_hypotheses,
+                                             std::function<float(FitnessScoreStruct)> computeFitness, double fitness_thr);
+    std::vector<v4r::ObjectHypothesesGroup> callRecognizer(DetectedObject obj);
+    std::pair<HypothesesStruct, bool> filterRecoHypothesis(DetectedObject obj, std::vector<v4r::ObjectHypothesis::Ptr> hg);
+    std::vector<ObjectHypothesesStruct> createHypotheses();
 
 };
 

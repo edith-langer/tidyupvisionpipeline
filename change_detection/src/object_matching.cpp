@@ -65,16 +65,14 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
     }
 
 
-    double ppf_rec_time_sum = 0.0;
-
     std::vector<ObjectHypothesesStruct> global_scene_hypotheses;
 
-
+    /// setup recognizer
     auto start = std::chrono::high_resolution_clock::now();
     //omp_set_num_threads(1);
-    v4r::apps::PPFRecognizer<pcl::PointXYZRGB> rec{ppf_params};
-    rec.setModelsDir(model_path_);
-    rec.setup(force_retrain);
+    rec_.reset(new v4r::apps::PPFRecognizer<pcl::PointXYZRGB>{ppf_params});
+    rec_->setModelsDir(model_path_);
+    rec_->setup(force_retrain);
     auto stop = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::minutes>(stop-start);
     std::cout << "Time to train the models " << duration.count() << " minutes" << std::endl;
@@ -83,129 +81,19 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
     //---------------------------------------------------------------------------
     //std::vector<std::string> objects_to_look_for{};   // empty vector means look for all objects
 
-
-    for (size_t i = 0; i < object_vec_.size(); i++) {
-
-        /// Create separate rgb and normal clouds in both cases to be able to call the recognizer
-        pcl::PointCloud<pcl::Normal>::Ptr object_normals(new pcl::PointCloud<pcl::Normal>);
-        pcl::PointCloud<PointRGB>::Ptr object_rgb(new pcl::PointCloud<PointRGB>);
-
-        pcl::copyPointCloud(*object_vec_[i].getObjectCloud(), *object_rgb);
-        pcl::copyPointCloud(*object_vec_[i].getObjectCloud(), *object_normals);
-
-        ObjectHypothesesStruct object_hypotheses;
-        object_hypotheses.object_id = object_vec_[i].getID();
-        object_hypotheses.object_cloud = object_vec_[i].getObjectCloud();
-
-        //choose the models that should be used with the recognizer
-        std::vector<std::string> objects_to_look_for;
-        for (DetectedObject m : model_vec_) {
-            //if model object was already matched
-            if (m.state_ == ObjectState::STATIC || m.state_ == ObjectState::DISPLACED)
-                continue;
-
-            //if we haven't tried to match this object with this model
-            if (object_vec_[i].already_checked_model_ids.find(m.getID()) == object_vec_[i].already_checked_model_ids.end())
-            {
-                objects_to_look_for.push_back(std::to_string(m.getID()));
-                object_vec_[i].already_checked_model_ids.insert(m.getID());
-            }
-        }
-        if (objects_to_look_for.size() == 0) { //otherwise the recognizer checks for all objects in the model folder
-            std::cout << "No model that has not been checked." << object_vec_[i].getID() << std::endl;
-            continue;
-        }
-
-        //call the recognizer with object normals
-        auto start = std::chrono::high_resolution_clock::now();
-        auto hypothesis_groups = rec.recognize(object_rgb, objects_to_look_for, object_normals);
-        auto stop = std::chrono::high_resolution_clock::now();
-        ppf_rec_time_sum += std::chrono::duration_cast<std::chrono::milliseconds>(stop-start).count();
-        //remove hypothesis groups with 0 hypothesis
-        hypothesis_groups.erase(std::remove_if(hypothesis_groups.begin(),hypothesis_groups.end(), [](const auto &a){ return a.ohs_.size() == 0; }), hypothesis_groups.end());
-
-        if (hypothesis_groups.size() == 0) {
-            std::cout << "New object. No hypothesis found for object " << object_vec_[i].getID() << std::endl;
-            continue;
-        }
-
-        //std::sort(hypothesis_groups.begin(), hypothesis_groups.end(), [](const auto& a, const auto& b) { return a.ohs_[0]->confidence_wo_hv_ > b.ohs_[0]->confidence_wo_hv_; });
-
-        boost::filesystem::path model_path_orig(model_path_);
-        std::string cloud_matches_dir =  model_path_orig.remove_trailing_separator().parent_path().string() + "/matches/object" + std::to_string(object_vec_[i].getID());
-        boost::filesystem::create_directories(cloud_matches_dir);
-        pcl::io::savePCDFile(cloud_matches_dir + "/object.pcd", *object_vec_[i].getObjectCloud());
-        // use results
-        for (auto& hg : hypothesis_groups) {
-            FitnessScoreStruct best_fitness;
-            double best_score = 0.0;
-            for (auto& h : hg.ohs_) {
-
-                //transform model
-                typename pcl::PointCloud<PointNormal>::ConstPtr model_cloud = rec.getModel(h->model_id_); //second paramater: resolution in mm
-                typename pcl::PointCloud<PointNormal>::Ptr model_aligned(new pcl::PointCloud<PointNormal>());
-                pcl::transformPointCloudWithNormals(*model_cloud, *model_aligned, h->transform_);
-                //tranformation after ICP was applied, if set in the config file
-                typename pcl::PointCloud<PointNormal>::Ptr model_aligned_refined(new pcl::PointCloud<PointNormal>());
-                pcl::transformPointCloudWithNormals(*model_cloud, *model_aligned_refined, h->pose_refinement_ * h->transform_); /// pose_refinment contains ICP result
-
-                //check if model and object are below supporting plane
-                typename pcl::PointCloud<PointNormal>::Ptr object_aligned(new pcl::PointCloud<PointNormal>());
-                pcl::transformPointCloudWithNormals(*object_vec_[i].getObjectCloud(), *object_aligned, (h->pose_refinement_ * h->transform_).inverse()); /// pose_refinment contains ICP result
-                int model_id = std::stoi(h->model_id_);
-                std::vector<DetectedObject>::iterator ro_iter = std::find_if( model_vec_.begin(), model_vec_.end(),[&model_id](DetectedObject const &o) {return o.getID() == model_id; });
-                if (isBelowPlane(model_aligned_refined, object_vec_[i].plane_cloud_) && isBelowPlane(object_aligned, ro_iter->plane_cloud_)) {
-                    std::cout << "Model and object " << h->model_id_ << " are below plane and therefore not a valid solution" << std::endl;
-                    continue;
-                }
-
-                //compute confidence based on normals and color between object and model
-                object_hypotheses.obj_pts_not_explained_cloud = object_vec_[i].getObjectCloud();
-                FitnessScoreStruct fitness_score  = computeModelFitness(object_vec_[i].getObjectCloud(), model_aligned_refined, ppf_params);
-
-                //TODO: combined or max fitness score?
-                h->confidence_ = (fitness_score.object_conf + fitness_score.model_conf) / 2;
-                //h->confidence_ = std::min(fitness_score.object_conf, fitness_score.model_conf);
-                std::cout << "Confidence " << object_hypotheses.object_id << "-" << h->model_id_ << " " << h->confidence_ << std::endl;
-
-                if (h->confidence_ > best_score)
-                {
-                    best_score = h->confidence_;
-                    best_fitness = fitness_score;
-                }
-
-                std::string result_cloud_path = cloud_matches_dir + "/conf_" + std::to_string(fitness_score.object_conf) + "_" + std::to_string(fitness_score.model_conf) + "_model_" + h->model_id_ + "_" +
-                        (ppf_params.ppf_rec_pipeline_.use_color_ ? "_color" : "");
-                saveCloudResults(object_vec_[i].getObjectCloud(), model_aligned, model_aligned_refined, result_cloud_path);
-            }
-            // do non-maxima surpression on all hypotheses in a hypotheses group based on model fitness (i.e. select only the
-            // one hypothesis in group with best confidence score)
-            std::sort(hg.ohs_.begin(), hg.ohs_.end(), [](const auto &a, const auto &b) { return a->confidence_ > b->confidence_; });
-            hg.ohs_.resize(1);
-            object_hypotheses.model_fitness_map[hg.ohs_[0]->model_id_] = best_fitness;
-        }
-        if (hypothesis_groups.size() > 0 ) {
-            object_hypotheses.hypotheses = hypothesis_groups;
-            global_scene_hypotheses.push_back(object_hypotheses);
-        } else {
-            std::cout << "New object. Couldn't find a hypothesis for object " << object_vec_[i].getID() << std::endl;
-        }
-    }
+    //call the recognizer, filter hypotheses
+    global_scene_hypotheses = createHypotheses();
+    if (global_scene_hypotheses.size() == 0)
+        return {};
 
     /// first try to match single standing objects --> therefore used min_fitness_weight for confidence computation between two objects
     /// if we find a match, we assume that the whole cluster is one object (because the confidence has to be high for both model and object)
     /// remove hypothesis with a confidence lower than min_fitness_thr
-    std::vector<ObjectHypothesesStruct> single_obj_global_scene_hypotheses = global_scene_hypotheses;
-    for (size_t gh = 0; gh < single_obj_global_scene_hypotheses.size(); gh++) {
-        ObjectHypothesesStruct &ohs = single_obj_global_scene_hypotheses[gh];
-        ohs.hypotheses.erase(std::remove_if(ohs.hypotheses.begin(),ohs.hypotheses.end(), [&ohs](const auto &a){
-            FitnessScoreStruct fitness = ohs.model_fitness_map[a.ohs_[0]->model_id_];
-            double min_fitness = std::min(fitness.model_conf, fitness.object_conf);
-            return min_fitness < ppf_params.min_fitness_weight_thr_ ;
-        }), ohs.hypotheses.end());
-    }
-    std::vector<Match> model_obj_matches_single_standing = weightedGraphMatching(single_obj_global_scene_hypotheses);
-    std::vector<int> used_model_ids;
+    std::function<float(FitnessScoreStruct)> minFitness =
+            [](FitnessScoreStruct s) {
+                return std::min(s.model_conf, s.object_conf);
+    };
+    std::vector<Match> model_obj_matches_single_standing = weightedGraphMatching(global_scene_hypotheses, minFitness,  ppf_params.min_fitness_weight_thr_);
     for (size_t m = 0; m < model_obj_matches_single_standing.size(); m++) {
         Match &match = model_obj_matches_single_standing[m];
         int obj_id = match.object_id;
@@ -229,35 +117,15 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
 
         //delete hypothesis of object
         global_scene_hypotheses.erase(std::remove_if(global_scene_hypotheses.begin(),global_scene_hypotheses.end(), [obj_id](const auto &a){ return a.object_id == obj_id ; }), global_scene_hypotheses.end());
-        used_model_ids.push_back(model_id);
 
-    }
-
-    //recompute fitness (avg instead of min) and check if model id was already matched
-    for (size_t gh = 0; gh < global_scene_hypotheses.size(); gh++) {
-        ObjectHypothesesStruct &ohs = global_scene_hypotheses[gh];
-        for (size_t h = 0; h < ohs.hypotheses.size(); h++) {
-            v4r::ObjectHypothesis::Ptr &oh = ohs.hypotheses[h].ohs_[0];
-            int h_model_id = std::stoi(oh->model_id_);
-            if (std::find(used_model_ids.begin(), used_model_ids.end(), h_model_id) != used_model_ids.end()) {
-                //model is already matched
-                oh->confidence_ = 0.0;
-            } else {
-                //recompute fitness using avarage value
-                FitnessScoreStruct fitness = ohs.model_fitness_map[oh->model_id_];
-                oh->confidence_ = (fitness.object_conf + fitness.model_conf) / 2;
+        //delete model hypotheses
+        for (size_t g = 0; g < global_scene_hypotheses.size(); g++) {
+            std::map<int, HypothesesStruct> & model_h = global_scene_hypotheses[g].model_hyp;
+            if (model_h.find(model_id) != model_h.end())
+                model_h.erase(model_id);
             }
-        }
     }
-
-    //remove hypothesis with a confidence below threshold
-    for (size_t gh = 0; gh < global_scene_hypotheses.size(); gh++) {
-        ObjectHypothesesStruct &ohs = global_scene_hypotheses[gh];
-        ohs.hypotheses.erase(std::remove_if(ohs.hypotheses.begin(),ohs.hypotheses.end(), [](const auto &a){ return a.ohs_[0]->confidence_ < ppf_params.avg_fitness_weight_thr_ ; }), ohs.hypotheses.end());
-    }
-    global_scene_hypotheses.erase(std::remove_if(global_scene_hypotheses.begin(), global_scene_hypotheses.end(), [](const ObjectHypothesesStruct oh) {return oh.hypotheses.size() == 0; }), global_scene_hypotheses.end());
-
-
+    //TODO: maybe delete global hypotheses with model_hyp.size == 0
 
     //now try to split clustered objects using bipartite graph in a loop
     //to be able to separate objects, do this as long as a result can be found
@@ -266,276 +134,185 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
         model_id_cloud.insert(std::make_pair(model_vec_[m].getID(), model_vec_[m].getObjectCloud()));
     }
 
-
+    std::function<float(FitnessScoreStruct)> avgFitness =
+            [](FitnessScoreStruct s) {
+            if (std::min(s.object_conf, s.model_conf) < 0.3)
+                return 0.0f;
+            return (s.object_conf + s.model_conf) / 2;
+    };
     std::vector<Match> model_obj_matches;
-    std::vector<Match> model_obj_matches_single_run = weightedGraphMatching(global_scene_hypotheses);
+    std::vector<Match> model_obj_matches_single_run = weightedGraphMatching(global_scene_hypotheses, avgFitness, ppf_params.avg_fitness_weight_thr_);
     while (model_obj_matches_single_run.size() > 0) {
         //remove already matched hypotheses
         model_obj_matches.insert(model_obj_matches.end(), model_obj_matches_single_run.begin(), model_obj_matches_single_run.end());
         for (size_t i = 0; i < model_obj_matches_single_run.size(); i++) {
-            const int& obj_id_match = model_obj_matches_single_run[i].object_id;
-            const int& model_id_match = model_obj_matches_single_run[i].model_id;
-            auto object_hyp_iter = std::find_if( global_scene_hypotheses.begin(), global_scene_hypotheses.end(),[obj_id_match](ObjectHypothesesStruct const &o) {return o.object_id == obj_id_match; });
-            if (object_hyp_iter == global_scene_hypotheses.end()) {
-                std::cerr << "Wanted to remove a found match from the global hypotheses, but it is not there!? How can that happen?" << std::endl;
-                return {}; //return empty vector
-            }
-            int scene_ind = std::distance(global_scene_hypotheses.begin(), object_hyp_iter);
-            std::vector<v4r::ObjectHypothesesGroup>& hg = global_scene_hypotheses[scene_ind].hypotheses;
-            auto model_hyp_iter = std::find_if(hg.begin(), hg.end(), [model_id_match](const auto &h) {return h.ohs_[0]->model_id_ == std::to_string(model_id_match);});
+            Match match = model_obj_matches_single_run[i];
+            const int& obj_id = match.object_id;
+            const int& model_id = match.model_id;
 
-            //remove points from original object input cloud
-            typename pcl::PointCloud<PointNormal>::ConstPtr model_cloud = rec.getModel((*model_hyp_iter).ohs_[0]->model_id_); //second paramater: resolution in mm
-            typename pcl::PointCloud<PointNormal>::Ptr model_aligned_refined(new pcl::PointCloud<PointNormal>());
-            pcl::copyPointCloud(*model_cloud, *model_aligned_refined);
-            pcl::transformPointCloudWithNormals(*model_aligned_refined, *model_aligned_refined, (*model_hyp_iter).ohs_[0]->pose_refinement_ * (*model_hyp_iter).ohs_[0]->transform_);
+            std::vector<DetectedObject>::iterator co_iter = std::find_if( object_vec_.begin(), object_vec_.end(),[&obj_id](DetectedObject const &o) {return o.getID() == obj_id; });
+            std::vector<DetectedObject>::iterator ro_iter = std::find_if( model_vec_.begin(), model_vec_.end(),[&model_id](DetectedObject const &o) {return o.getID() == model_id; });
 
-            SceneDifferencingPoints scene_diff(point_dist_diff);
+            //get the original model and object clouds for the  match
+            const pcl::PointCloud<PointNormal>::Ptr model_cloud = ro_iter->getObjectCloud();
+            const pcl::PointCloud<PointNormal>::Ptr object_cloud = co_iter->getObjectCloud();
+
+            //compute distance between object and model
+            float dist = estimateDistance(object_cloud, model_cloud, match.transform);
+            bool is_static = dist < max_dist_for_being_static;
+
+            pcl::PointCloud<PointNormal>::Ptr model_aligned(new pcl::PointCloud<PointNormal>());
+            pcl::transformPointCloudWithNormals(*model_cloud, *model_aligned, match.transform);
+
+            //remove points from MODEL object input cloud
+            SceneDifferencingPoints scene_diff(point_dist_diff); //this influences how many of the neighbouring points get added to the model
             std::vector<int> diff_ind;
             std::vector<int> corresponding_ind;
-            SceneDifferencingPoints::Cloud::Ptr object_leftover = scene_diff.computeDifference(global_scene_hypotheses[scene_ind].obj_pts_not_explained_cloud,
-                                                                                               model_aligned_refined, diff_ind, corresponding_ind);
+            SceneDifferencingPoints::Cloud::Ptr model_diff_cloud = scene_diff.computeDifference(model_aligned, object_cloud, diff_ind, corresponding_ind);
+
             //remove very small clusters from the diff
             std::vector<int> small_cluster_ind;
-            ObjectMatching::clusterOutliersBySize(object_leftover, small_cluster_ind, 0.014, min_object_size);
+            ObjectMatching::clusterOutliersBySize(model_diff_cloud, small_cluster_ind, 0.014, min_object_size);
             for (int i = small_cluster_ind.size() - 1; i >= 0; i--) {
-                object_leftover->points.erase(object_leftover->points.begin() + small_cluster_ind[i]);
+                model_diff_cloud->points.erase(model_diff_cloud->points.begin() + small_cluster_ind[i]);
+                diff_ind.erase(diff_ind.begin() + small_cluster_ind[i]);
             }
-            object_leftover->width = object_leftover->points.size();
+            model_diff_cloud->width = model_diff_cloud->points.size();
+            //TODO add the small_Cluster_ind to the model_cloud
 
             //if the leftover is just a plane, remove it
-            if (isObjectPlanar(object_leftover, 0.01, 0.9))
-                object_leftover->clear();
+            if (isObjectPlanar(model_diff_cloud, 0.01, 0.9))
+                model_diff_cloud->clear();
 
-            //remove points from model_clouds
-            pcl::transformPointCloudWithNormals(*(model_id_cloud.at(model_id_match)), *model_aligned_refined, (*model_hyp_iter).ohs_[0]->pose_refinement_ * (*model_hyp_iter).ohs_[0]->transform_);
+            //nothing is left of the diff --> the whole model cluster is a match
+            if (model_diff_cloud->size() == 0 || diff_ind.size() < min_object_size || isObjectPlanar(model_diff_cloud, 0.01, 0.9)) { //if less than 100 points left, we do not split the model object
+                if (is_static) {
+                    ro_iter->state_ = ObjectState::STATIC;
+                    ro_iter->match_ = match;
+                } else {
+                    ro_iter->state_ = ObjectState::DISPLACED;
+                    ro_iter->match_ = match;
+                }
+                model_diff_cloud->clear();
+            }
+            //split the model cloud
+            else {
+                //the part that is matched
+                pcl::PointCloud<PointNormal>::Ptr matched_model_part(new pcl::PointCloud<PointNormal>);
+                pcl::ExtractIndices<PointNormal> extract;
+                extract.setInputCloud (model_aligned);
+                pcl::PointIndices::Ptr c_ind(new pcl::PointIndices());
+                c_ind->indices = diff_ind;
+                extract.setIndices(c_ind);
+                extract.setKeepOrganized(false);
+                extract.setNegative (true);
+                extract.filter(*matched_model_part);
 
-            SceneDifferencingPoints::Cloud::Ptr model_leftover = scene_diff.computeDifference(model_aligned_refined,
-                                                                                              global_scene_hypotheses[scene_ind].obj_pts_not_explained_cloud, diff_ind, corresponding_ind);
+                //re-compute fitness for the splitted part
+                match.fitness_score = computeModelFitness(object_cloud, matched_model_part, ppf_params);
 
-            //remove very small clusters from the diff
+                //transform back to original scene
+                pcl::transformPointCloudWithNormals(*matched_model_part, *matched_model_part, match.transform.inverse());
+                pcl::transformPointCloudWithNormals(*model_diff_cloud, *model_diff_cloud, match.transform.inverse());
+
+                //the matched part of the model
+                ro_iter->setObjectCloud(matched_model_part);
+                ro_iter->state_ =(is_static ? ObjectState::STATIC : ObjectState::DISPLACED);
+                ro_iter->match_ = match;
+                ro_iter->object_folder_path_="";
+
+                //we add the diff_model_part later to the model_vec because it invalidates the vector
+            }
+
+            //remove points from OBJECT object input cloud
+            diff_ind.clear(); corresponding_ind.clear();
+            pcl::PointCloud<PointNormal>::Ptr object_diff_cloud = scene_diff.computeDifference(object_cloud, model_aligned, diff_ind, corresponding_ind);
+
             small_cluster_ind.clear();
-            ObjectMatching::clusterOutliersBySize(model_leftover, small_cluster_ind, 0.014, min_object_size);
+            ObjectMatching::clusterOutliersBySize(object_diff_cloud, small_cluster_ind, 0.014, min_object_size);
             for (int i = small_cluster_ind.size() - 1; i >= 0; i--) {
-                model_leftover->points.erase(model_leftover->points.begin() + small_cluster_ind[i]);
+                object_diff_cloud->points.erase(object_diff_cloud->points.begin() + small_cluster_ind[i]);
+                diff_ind.erase(diff_ind.begin() + small_cluster_ind[i]);
             }
-            model_leftover->width = model_leftover->points.size();
+            object_diff_cloud->width = object_diff_cloud->points.size();
+            //TODO add the small_Cluster_ind to the object_cloud
 
             //if the leftover is just a plane, remove it
-            if (isObjectPlanar(model_leftover, 0.01, 0.9))
-                model_leftover->clear();
+            if (isObjectPlanar(object_diff_cloud, 0.01, 0.9))
+                object_diff_cloud->clear();
 
-            //transform the model back to original
-            pcl::transformPointCloudWithNormals(*model_leftover, *model_leftover, ((*model_hyp_iter).ohs_[0]->pose_refinement_ * (*model_hyp_iter).ohs_[0]->transform_).inverse());
-
-            model_id_cloud.at(model_id_match) = model_leftover;
-            global_scene_hypotheses[scene_ind].obj_pts_not_explained_cloud = object_leftover;
-
-            hg.erase(model_hyp_iter);
-        }
-
-        //First, erase all hypotheses where there are less than 100 points of the object not explained
-        global_scene_hypotheses.erase(std::remove_if(global_scene_hypotheses.begin(), global_scene_hypotheses.end(), [](const ObjectHypothesesStruct oh) {return oh.obj_pts_not_explained_cloud->points.size() < min_object_size; }), global_scene_hypotheses.end());
-        if (global_scene_hypotheses.size() == 0) {
-            break;
-        }
-        for (size_t gh = 0; gh < global_scene_hypotheses.size(); gh++) {
-            ObjectHypothesesStruct &ohs = global_scene_hypotheses[gh];
-            for (size_t h = 0; h < ohs.hypotheses.size(); h++) {
-                //Second, update the confidences using the unexplained model points
-                v4r::ObjectHypothesis::Ptr &oh = ohs.hypotheses[h].ohs_[0];
-                int model_id = std::stoi(oh->model_id_);
-                if (model_id_cloud.at(model_id)->size() < min_object_size) {
-                    oh->confidence_ = 0.0;
+            if (object_diff_cloud->size() == 0 || diff_ind.size() < min_object_size || isObjectPlanar(object_diff_cloud, 0.01, 0.9)) { //if less than 100 points left, we do not split the object
+                if (is_static) {
+                    co_iter->state_ = ObjectState::STATIC;
+                    co_iter->match_ = match;
+                } else {
+                    co_iter->state_ = ObjectState::DISPLACED;
+                    co_iter->match_ = match;
                 }
-                else {
-                    typename pcl::PointCloud<PointNormal>::Ptr model_aligned_refined(new pcl::PointCloud<PointNormal>());
-                    pcl::transformPointCloudWithNormals(*(model_id_cloud.at(model_id)), *model_aligned_refined, oh->pose_refinement_ * oh->transform_);
-                    FitnessScoreStruct fitness_score  = computeModelFitness(ohs.obj_pts_not_explained_cloud, model_aligned_refined, ppf_params);
-                    //TODO: combined or max fitness score?
-                    oh->confidence_ = (fitness_score.object_conf + fitness_score.model_conf) / 2;
-                    //oh->confidence_ = std::max(fitness_score.object_conf, fitness_score.model_conf);
-                }
+                object_diff_cloud->clear();
             }
-            ohs.hypotheses.erase(std::remove_if(ohs.hypotheses.begin(),ohs.hypotheses.end(), [](const auto &a){ return a.ohs_[0]->confidence_ < ppf_params.avg_fitness_weight_thr_ ; }), ohs.hypotheses.end());
-        }
-        global_scene_hypotheses.erase(std::remove_if(global_scene_hypotheses.begin(), global_scene_hypotheses.end(), [](const ObjectHypothesesStruct oh) {return oh.hypotheses.size() == 0; }), global_scene_hypotheses.end());
+            //split the object cloud
+            else {
+                //the part that is matched
+                pcl::PointCloud<PointNormal>::Ptr matched_object_part(new pcl::PointCloud<PointNormal>);
+                pcl::ExtractIndices<PointNormal> extract;
+                pcl::PointIndices::Ptr c_ind(new pcl::PointIndices());
+                extract.setInputCloud (object_cloud);
+                c_ind->indices = diff_ind;
+                extract.setIndices(c_ind);
+                extract.setKeepOrganized(false);
+                extract.setNegative (true);
+                extract.filter(*matched_object_part);
 
-        if (global_scene_hypotheses.size() == 0) {
-            break;
+                //re-compute fitness for the splitted part
+                match.fitness_score = computeModelFitness(matched_object_part, model_aligned, ppf_params);
+
+                //the matched part of the object
+                co_iter->setObjectCloud(matched_object_part);
+                co_iter->state_ = (is_static ? ObjectState::STATIC : ObjectState::DISPLACED);
+                co_iter->match_ = match;
+                co_iter->object_folder_path_="";
+
+                //we add the diff_object_part later to the object_vec because it invalidates the vector
+
+                //save the new partly matched object
+                boost::filesystem::path model_path_orig(model_path_);
+                std::string cloud_matches_dir =  model_path_orig.remove_trailing_separator().parent_path().string() + "/matches/object" + std::to_string(match.object_id) + "_part_match";
+                boost::filesystem::create_directories(cloud_matches_dir);
+                std::string result_cloud_path = cloud_matches_dir + "/conf_" + std::to_string(match.fitness_score.object_conf) + "_" + std::to_string(match.fitness_score.model_conf) + "_model_" + std::to_string(match.model_id) + "_" +
+                        (ppf_params.ppf_rec_pipeline_.use_color_ ? "_color" : "");
+                saveCloudResults(matched_object_part, model_aligned, result_cloud_path);
+
+
+                //pcl::io::savePCDFile("/home/edith/object_part.pcd", *matched_object_part);
+                //pcl::io::savePCDFile("/home/edith/object_remaining.pcd", *object_diff_cloud);
+            }
+
+
+            //ATTENTION: The ro_iter is invalid now because of the push_back. Vector re-allocates and invalidates pointers
+            if (model_diff_cloud->size() > 0) {
+                //the remaining part of the model
+                DetectedObject diff_model_part(model_diff_cloud, ro_iter->plane_cloud_, ObjectState::REMOVED, "");
+                model_vec_.push_back(diff_model_part);
+            }
+
+            //ATTENTION: The co_iter is invalid now because of the push_back. Vector re-allocates and invalidates pointers
+            if (object_diff_cloud->size() > 0) {
+                //the remaining part of the object
+                DetectedObject diff_object_part(object_diff_cloud, co_iter->plane_cloud_, ObjectState::NEW, "");
+                object_vec_.push_back(diff_object_part);
+            }
         }
+
+        //call recognizer again
+        global_scene_hypotheses = createHypotheses();
+        if (global_scene_hypotheses.size() == 0)
+            break;
 
         //build a new graph with the remaining ones
-        model_obj_matches_single_run = weightedGraphMatching(global_scene_hypotheses);
+        model_obj_matches_single_run = weightedGraphMatching(global_scene_hypotheses, avgFitness, ppf_params.avg_fitness_weight_thr_);
     }
-    model_obj_matches.erase(std::remove_if(model_obj_matches.begin(),model_obj_matches.end(), [](const auto &a){ return a.confidence < ppf_params.avg_fitness_weight_thr_ ; }), model_obj_matches.end());
 
-    std::cout << "Time spent to recognize objects with PPF: " << (ppf_rec_time_sum/1000) << " seconds." << std::endl;
-
-    for (size_t m = 0; m < model_obj_matches.size(); m++) {
-        Match &match = model_obj_matches[m];
-        int obj_id = match.object_id;
-        int model_id = match.model_id;
-        std::vector<DetectedObject>::iterator co_iter = std::find_if( object_vec_.begin(), object_vec_.end(),[&obj_id](DetectedObject const &o) {return o.getID() == obj_id; });
-        std::vector<DetectedObject>::iterator ro_iter = std::find_if( model_vec_.begin(), model_vec_.end(),[&model_id](DetectedObject const &o) {return o.getID() == model_id; });
-
-        //get the original model and object clouds for the  match
-        const pcl::PointCloud<PointNormal>::Ptr model_cloud = ro_iter->getObjectCloud();
-        const pcl::PointCloud<PointNormal>::Ptr object_cloud = co_iter->getObjectCloud();
-
-        //compute distance between object and model
-        float dist = estimateDistance(object_cloud, model_cloud, match.transform);
-        bool is_static = dist < max_dist_for_being_static;
-
-        pcl::PointCloud<PointNormal>::Ptr model_aligned(new pcl::PointCloud<PointNormal>());
-        pcl::transformPointCloudWithNormals(*model_cloud, *model_aligned, match.transform);
-
-        //remove points from MODEL object input cloud
-        SceneDifferencingPoints scene_diff(point_dist_diff); //this influences how many of the neighbouring points get added to the model
-        std::vector<int> diff_ind;
-        std::vector<int> corresponding_ind;
-        SceneDifferencingPoints::Cloud::Ptr model_diff_cloud = scene_diff.computeDifference(model_aligned, object_cloud, diff_ind, corresponding_ind);
-
-        //remove very small clusters from the diff
-        std::vector<int> small_cluster_ind;
-        ObjectMatching::clusterOutliersBySize(model_diff_cloud, small_cluster_ind, 0.014, min_object_size);
-        for (int i = small_cluster_ind.size() - 1; i >= 0; i--) {
-            model_diff_cloud->points.erase(model_diff_cloud->points.begin() + small_cluster_ind[i]);
-            diff_ind.erase(diff_ind.begin() + small_cluster_ind[i]);
-        }
-        model_diff_cloud->width = model_diff_cloud->points.size();
-
-        if (model_diff_cloud->size() == 0 || diff_ind.size() < min_object_size || isObjectPlanar(model_diff_cloud, 0.01, 0.9)) { //if less than 100 points left, we do not split the model object
-            if (is_static) {
-                ro_iter->state_ = ObjectState::STATIC;
-                ro_iter->match_ = match;
-            } else {
-                ro_iter->state_ = ObjectState::DISPLACED;
-                ro_iter->match_ = match;
-            }
-            model_diff_cloud->clear();
-        }
-        //split the model cloud
-        else {
-            //the part that is matched
-            pcl::PointCloud<PointNormal>::Ptr matched_model_part(new pcl::PointCloud<PointNormal>);
-            pcl::ExtractIndices<PointNormal> extract;
-            extract.setInputCloud (model_aligned);
-            pcl::PointIndices::Ptr c_ind(new pcl::PointIndices());
-            c_ind->indices = diff_ind;
-            extract.setIndices(c_ind);
-            extract.setKeepOrganized(false);
-            extract.setNegative (true);
-            extract.filter(*matched_model_part);
-            //transform back to original scene
-            pcl::transformPointCloudWithNormals(*matched_model_part, *matched_model_part, match.transform.inverse());
-            pcl::transformPointCloudWithNormals(*model_diff_cloud, *model_diff_cloud, match.transform.inverse());
-
-            //the matched part of the model
-            ro_iter->setObjectCloud(matched_model_part);
-            ro_iter->state_ =(is_static ? ObjectState::STATIC : ObjectState::DISPLACED);
-            ro_iter->match_ = match;
-            ro_iter->object_folder_path_="";
-
-
-            //we add the diff_model_part later to the model_vec because it invalidates the vector
-        }
-
-        //remove points from OBJECT object input cloud
-        diff_ind.clear(); corresponding_ind.clear();
-        pcl::PointCloud<PointNormal>::Ptr object_diff_cloud = scene_diff.computeDifference(object_cloud, model_aligned, diff_ind, corresponding_ind);
-
-        small_cluster_ind.clear();
-        ObjectMatching::clusterOutliersBySize(object_diff_cloud, small_cluster_ind, 0.014, min_object_size);
-        for (int i = small_cluster_ind.size() - 1; i >= 0; i--) {
-            object_diff_cloud->points.erase(object_diff_cloud->points.begin() + small_cluster_ind[i]);
-            diff_ind.erase(diff_ind.begin() + small_cluster_ind[i]);
-        }
-        object_diff_cloud->width = object_diff_cloud->points.size();
-
-
-        if (object_diff_cloud->size() == 0 || diff_ind.size() < min_object_size || isObjectPlanar(object_diff_cloud, 0.01, 0.9)) { //if less than 100 points left, we do not split the object
-            if (is_static) {
-                co_iter->state_ = ObjectState::STATIC;
-                co_iter->match_ = match;
-            } else {
-                co_iter->state_ = ObjectState::DISPLACED;
-                co_iter->match_ = match;
-            }
-            object_diff_cloud->clear();
-        }
-        //split the object cloud
-        else {
-            //the part that is matched
-            pcl::PointCloud<PointNormal>::Ptr matched_object_part(new pcl::PointCloud<PointNormal>);
-            pcl::ExtractIndices<PointNormal> extract;
-            pcl::PointIndices::Ptr c_ind(new pcl::PointIndices());
-            extract.setInputCloud (object_cloud);
-            c_ind->indices = diff_ind;
-            extract.setIndices(c_ind);
-            extract.setKeepOrganized(false);
-            extract.setNegative (true);
-            extract.filter(*matched_object_part);
-
-            //the matched part of the object
-            co_iter->setObjectCloud(matched_object_part);
-            co_iter->state_ = (is_static ? ObjectState::STATIC : ObjectState::DISPLACED);
-            co_iter->match_ = match;
-            co_iter->object_folder_path_="";
-
-            //we add the diff_object_part later to the object_vec because it invalidates the vector
-
-            //save the new partly matched object
-            boost::filesystem::path model_path_orig(model_path_);
-            std::string cloud_matches_dir =  model_path_orig.remove_trailing_separator().parent_path().string() + "/matches/object" + std::to_string(match.object_id) + "_part_match";
-            boost::filesystem::create_directories(cloud_matches_dir);
-            std::string result_cloud_path = cloud_matches_dir + "/conf_" + std::to_string(match.fitness_score.object_conf) + "_" + std::to_string(match.fitness_score.model_conf) + "_model_" + std::to_string(match.model_id) + "_" +
-                    (ppf_params.ppf_rec_pipeline_.use_color_ ? "_color" : "");
-            saveCloudResults(matched_object_part, model_aligned, model_aligned, result_cloud_path); //we don't have access to the not refined model
-
-
-            //pcl::io::savePCDFile("/home/edith/object_part.pcd", *matched_object_part);
-            //pcl::io::savePCDFile("/home/edith/object_remaining.pcd", *object_diff_cloud);
-        }
-        //recompute FitnessInformation - the fitness score was not set before
-        v4r::apps::PPFRecognizerParameter params;
-        pcl::PointCloud<PointNormal>::Ptr object_aligned (new pcl::PointCloud<PointNormal>);
-        pcl::transformPointCloudWithNormals(*co_iter->getObjectCloud(), *object_aligned, match.transform.inverse());
-        FitnessScoreStruct fitness_score = computeModelFitness(object_aligned, ro_iter->getObjectCloud(), params);
-        co_iter->match_.fitness_score = fitness_score;
-        ro_iter->match_.fitness_score = fitness_score;
-        co_iter->match_.confidence = std::max(fitness_score.object_conf, fitness_score.model_conf);
-        ro_iter->match_.confidence = std::max(fitness_score.object_conf, fitness_score.model_conf);
-
-
-        //ATTENTION: The ro_iter is invalid now because of the push_back. Vector re-allocates and invalidates pointers
-        if (model_diff_cloud->size() > 0) {
-            //the remaining part of the model
-            DetectedObject diff_model_part(model_diff_cloud, ro_iter->plane_cloud_, ObjectState::REMOVED, "");
-
-            //update matches with the new ID! Except for co_iter
-            for (size_t k = 0; k < model_obj_matches.size(); k++) {
-                if (model_obj_matches[k].model_id == ro_iter->getID() && model_obj_matches[k].object_id != ro_iter->match_.object_id) {
-                    model_obj_matches[k].model_id = diff_model_part.getID();
-                }
-            }
-            model_vec_.push_back(diff_model_part);
-        }
-
-        //ATTENTION: The co_iter is invalid now because of the push_back. Vector re-allocates and invalidates pointers
-        if (object_diff_cloud->size() > 0) {
-            //the remaining part of the object
-            DetectedObject diff_object_part(object_diff_cloud, co_iter->plane_cloud_, ObjectState::NEW, "");
-
-            //update matches with the new ID! Except for co_iter
-            for (size_t k = 0; k < model_obj_matches.size(); k++) {
-                if (model_obj_matches[k].object_id == co_iter->getID() && model_obj_matches[k].model_id != co_iter->match_.model_id) {
-                    model_obj_matches[k].object_id = diff_object_part.getID();
-                }
-            }
-            object_vec_.push_back(diff_object_part);
-        }
-    }
 
     //set all unmatched current objects to NEW
     for (DetectedObject &co : object_vec_) {
@@ -559,7 +336,9 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
     return model_obj_matches;
 }
 
-std::vector<Match> ObjectMatching::weightedGraphMatching(std::vector<ObjectHypothesesStruct> global_hypotheses) {
+std::vector<Match> ObjectMatching::weightedGraphMatching(std::vector<ObjectHypothesesStruct> global_hypotheses,
+                                                         std::function<float(FitnessScoreStruct)> computeFitness,
+                                                         double fitness_thr) {
 
     boost::graph_traits< my_graph >::vertex_iterator vi, vi_end;
 
@@ -572,10 +351,10 @@ std::vector<Match> ObjectMatching::weightedGraphMatching(std::vector<ObjectHypot
 
         auto obj_vertex = boost::add_vertex(VertexProperty(obj_vert_name),g);
 
-        for (size_t h = 0; h < global_hypotheses[o].hypotheses.size(); h++) {
-            const v4r::ObjectHypothesesGroup &obj_hypothesis = global_hypotheses[o].hypotheses[h];
-            const v4r::ObjectHypothesis::Ptr &model_h = obj_hypothesis.ohs_[0];
-            std::string model_vert_name = model_h->model_id_+"_model";
+        const std::map<int, HypothesesStruct> &hypos = global_hypotheses[o].model_hyp;
+        for (std::map<int, HypothesesStruct>::const_iterator it=hypos.begin(); it!=hypos.end(); ++it) {
+            const HypothesesStruct h = it->second;
+            std::string model_vert_name = std::to_string(h.model_id)+"_model";
             vertex_t model_vertex;
             if (modelToVertex.find(model_vert_name) == modelToVertex.end()) { //insert vertex into graph
                 model_vertex = boost::add_vertex(VertexProperty(model_vert_name),g);
@@ -585,9 +364,12 @@ std::vector<Match> ObjectMatching::weightedGraphMatching(std::vector<ObjectHypot
             }
             //boost::add_edge(o, model_uid, EdgeProperty(model_h->confidence_), g);
             //float ampl_weight = model_h->confidence_ * model_h->confidence_;
-            float ampl_weight = std::exp(4 * model_h->confidence_) -1; //exp(0) = 1 -> -1;
-            Eigen::Matrix4f transformation = model_h->pose_refinement_ * model_h->transform_;
-            boost::add_edge(obj_vertex, model_vertex, EdgeProperty(ampl_weight, transformation), g); //edge with confidence and transformation between model and object
+
+            float fitness = computeFitness(h.fitness);
+            if(fitness > fitness_thr){
+                float ampl_weight = std::exp(4 * fitness) - 1; //exp(0) = 1 -> -1;
+                boost::add_edge(obj_vertex, model_vertex, EdgeProperty(ampl_weight, h), g); //edge with confidence and transformation between model and object
+            }
         }
     }
 
@@ -602,7 +384,7 @@ std::vector<Match> ObjectMatching::weightedGraphMatching(std::vector<ObjectHypot
                 && boost::algorithm::contains(g[*vi].name, "model")) {//*vi < mate1[*vi]) {
             auto ed = boost::edge(*vi, mate[*vi], g); //returns pair<edge_descriptor, bool>, where bool indicates if edge exists or not
             float edge_weight = boost::get(boost::edge_weight_t(), g, ed.first);
-            Eigen::Matrix4f edge_transformation = boost::get(transformation_t(), g, ed.first);
+            HypothesesStruct edge_hypo = boost::get(hypo_t(), g, ed.first);
             float deampl_weight = std::log(edge_weight + 1) / 4;
             std::cout << "{" << g[*vi].name << ", " << g[mate[*vi]].name << "} - " << deampl_weight << std::endl;
 
@@ -611,7 +393,7 @@ std::vector<Match> ObjectMatching::weightedGraphMatching(std::vector<ObjectHypot
             std::string o_name = g[mate[*vi]].name;
             m_name.erase(m_name.length()-6, 6); //erase _model
             o_name.erase(o_name.length()-7, 7); //erase _object
-            Match m(std::stoi(m_name), std::stoi(o_name), deampl_weight, edge_transformation); //de-amplify
+            Match m(std::stoi(m_name), std::stoi(o_name), deampl_weight, edge_hypo.transform, edge_hypo.fitness); //de-amplify
             model_obj_match.push_back(m);
         }
     }
@@ -804,27 +586,17 @@ float ObjectMatching::estimateDistance(const pcl::PointCloud<PointNormal>::Ptr o
     return sum_eucl_dist/nr_overlapping_pts;
 }
 
-void ObjectMatching::saveCloudResults(pcl::PointCloud<PointNormal>::Ptr object_cloud, pcl::PointCloud<PointNormal>::Ptr model_aligned,
-                                      pcl::PointCloud<PointNormal>::Ptr model_aligned_refined, std::string path) {
+void ObjectMatching::saveCloudResults(pcl::PointCloud<PointNormal>::Ptr object_cloud, pcl::PointCloud<PointNormal>::Ptr model_aligned, std::string path) {
 
     //assign the matched model another label for better visualization
     pcl::PointXYZRGBL init_label_point;
-    init_label_point.label=10;
-    pcl::PointCloud<pcl::PointXYZRGBL>::Ptr model_algined_ref_labeled(new pcl::PointCloud<pcl::PointXYZRGBL>(model_aligned_refined->width, model_aligned_refined->height, init_label_point));
-    pcl::copyPointCloud(*model_aligned_refined, * model_algined_ref_labeled);
-    pcl::PointCloud<pcl::PointXYZRGBL>::Ptr model_object_after_icp{new pcl::PointCloud<pcl::PointXYZRGBL>};
-    pcl::copyPointCloud(*object_cloud, *model_object_after_icp);
-    *model_object_after_icp += *model_algined_ref_labeled;
-    pcl::io::savePCDFileBinary(path +".pcd", *model_object_after_icp);
-
-    //show the result of ICP
     init_label_point.label=20;
-    typename pcl::PointCloud<pcl::PointXYZRGBL>::Ptr model_object_before_icp(new pcl::PointCloud<pcl::PointXYZRGBL>());
+    typename pcl::PointCloud<pcl::PointXYZRGBL>::Ptr model_object_aligned(new pcl::PointCloud<pcl::PointXYZRGBL>());
     pcl::PointCloud<pcl::PointXYZRGBL>::Ptr model_aligned_labeled(new pcl::PointCloud<pcl::PointXYZRGBL>(model_aligned->width, model_aligned->height, init_label_point));
     pcl::copyPointCloud(*model_aligned, *model_aligned_labeled);
-    pcl::copyPointCloud(*object_cloud, *model_object_before_icp);
-    *model_object_before_icp += *model_aligned_labeled;
-    pcl::io::savePCDFileBinary(path +"_before_icp.pcd", *model_object_before_icp);
+    pcl::copyPointCloud(*object_cloud, *model_object_aligned);
+    *model_object_aligned += *model_aligned_labeled;
+    pcl::io::savePCDFileBinary(path +".pcd", *model_object_aligned);
 }
 
 
@@ -897,4 +669,153 @@ bool ObjectMatching::isObjectPlanar(pcl::PointCloud<PointNormal>::Ptr object, fl
     if (inliers->indices.size()/object->size() > plane_acc_thr)
         return true;
     return false;
+}
+
+std::vector<v4r::ObjectHypothesesGroup> ObjectMatching::callRecognizer(DetectedObject obj) {
+    double ppf_rec_time_sum = 0.0;
+
+    /// Create separate rgb and normal clouds in both cases to be able to call the recognizer
+    pcl::PointCloud<pcl::Normal>::Ptr object_normals(new pcl::PointCloud<pcl::Normal>);
+    pcl::PointCloud<PointRGB>::Ptr object_rgb(new pcl::PointCloud<PointRGB>);
+
+    pcl::copyPointCloud(*obj.getObjectCloud(), *object_rgb);
+    pcl::copyPointCloud(*obj.getObjectCloud(), *object_normals);
+
+    //choose the models that should be used with the recognizer
+    std::vector<std::string> objects_to_look_for;
+    for (DetectedObject m : model_vec_) {
+        //if model object was already matched
+        if (m.state_ == ObjectState::STATIC || m.state_ == ObjectState::DISPLACED)
+            continue;
+
+        //if we haven't tried to match this object with this model
+        if (obj.already_checked_model_ids.find(m.getID()) == obj.already_checked_model_ids.end())
+        {
+            objects_to_look_for.push_back(std::to_string(m.getID()));
+            obj.already_checked_model_ids.insert(m.getID());
+        }
+    }
+    if (objects_to_look_for.size() == 0) { //otherwise the recognizer checks for all objects in the model folder
+        std::cout << "No model that has not been checked." << obj.getID() << std::endl;
+        return {};
+    }
+
+    //call the recognizer with object normals
+    auto start = std::chrono::high_resolution_clock::now();
+    auto hypothesis_groups = rec_->recognize(object_rgb, objects_to_look_for, object_normals);
+    auto stop = std::chrono::high_resolution_clock::now();
+    ppf_rec_time_sum += std::chrono::duration_cast<std::chrono::milliseconds>(stop-start).count();
+
+    std::cout << "Time spent to recognize objects with PPF: " << (ppf_rec_time_sum/1000) << " seconds." << std::endl;
+
+    return hypothesis_groups;
+}
+
+std::pair<HypothesesStruct, bool> ObjectMatching::filterRecoHypothesis(DetectedObject obj, std::vector<v4r::ObjectHypothesis::Ptr> hg) {
+    FitnessScoreStruct best_fitness;
+    double best_score = 0.0;
+
+    for (v4r::ObjectHypothesis::Ptr & h : hg) {
+        //transform model
+        typename pcl::PointCloud<PointNormal>::ConstPtr model_cloud = rec_->getModel(h->model_id_); //second paramater: resolution in mm
+        typename pcl::PointCloud<PointNormal>::Ptr model_aligned(new pcl::PointCloud<PointNormal>());
+        pcl::transformPointCloudWithNormals(*model_cloud, *model_aligned, h->transform_);
+        //tranformation after ICP was applied, if set in the config file
+        typename pcl::PointCloud<PointNormal>::Ptr model_aligned_refined(new pcl::PointCloud<PointNormal>());
+        pcl::transformPointCloudWithNormals(*model_cloud, *model_aligned_refined, h->pose_refinement_ * h->transform_); /// pose_refinment contains ICP result
+
+        //check if model and object are below supporting plane
+        typename pcl::PointCloud<PointNormal>::Ptr object_aligned(new pcl::PointCloud<PointNormal>());
+        pcl::transformPointCloudWithNormals(*obj.getObjectCloud(), *object_aligned, (h->pose_refinement_ * h->transform_).inverse()); /// pose_refinment contains ICP result
+        int model_id = std::stoi(h->model_id_);
+        std::vector<DetectedObject>::iterator ro_iter = std::find_if( model_vec_.begin(), model_vec_.end(),[&model_id](DetectedObject const &o) {return o.getID() == model_id; });
+        if (isBelowPlane(model_aligned_refined, obj.plane_cloud_) && isBelowPlane(object_aligned, ro_iter->plane_cloud_)) {
+            std::cout << "Model and object " << h->model_id_ << " are below plane and therefore not a valid solution" << std::endl;
+            h->confidence_ = 0.0;
+            continue;
+        }
+
+        //compute confidence based on normals and color between object and model
+        FitnessScoreStruct fitness_score  = computeModelFitness(obj.getObjectCloud(), model_aligned_refined, ppf_params);
+
+        //TODO: only object_conf or only model_conf?
+        h->confidence_ = (fitness_score.object_conf + fitness_score.model_conf) / 2;
+        std::cout << "Confidence " << obj.getID() << "-" << h->model_id_ << " " << h->confidence_ << std::endl;
+
+        if (h->confidence_ > best_score)
+        {
+            best_score = h->confidence_;
+            best_fitness = fitness_score;
+        }
+    }
+    // do non-maxima surpression on all hypotheses in a hypotheses group based on model fitness (i.e. select only the
+    // one hypothesis in group with best confidence score)
+    std::sort(hg.begin(), hg.end(), [](const auto &a, const auto &b) { return a->confidence_ > b->confidence_; });
+    hg.resize(1);
+
+    if (hg[0]->confidence_ == 0.0) {
+        //no valid solution found
+        std::pair<HypothesesStruct, bool> return_val(HypothesesStruct(), false);
+        return return_val;
+    }
+
+    typename pcl::PointCloud<PointNormal>::Ptr model_aligned_refined(new pcl::PointCloud<PointNormal>());
+    pcl::transformPointCloudWithNormals(*(rec_->getModel(hg[0]->model_id_)), *model_aligned_refined, hg[0]->pose_refinement_ * hg[0]->transform_); /// pose_refinment contains ICP result
+
+    HypothesesStruct hypo(std::stoi(hg[0]->model_id_), model_aligned_refined, hg[0]->pose_refinement_ * hg[0]->transform_, best_fitness);
+    std::pair<HypothesesStruct, bool> return_val(hypo, true);
+    return return_val;
+}
+
+std::vector<ObjectHypothesesStruct> ObjectMatching::createHypotheses() {
+    std::vector<ObjectHypothesesStruct> global_scene_hypotheses;
+    for (size_t i = 0; i < object_vec_.size(); i++) {
+
+        if (object_vec_[i].state_ == ObjectState::STATIC || object_vec_[i].state_ == ObjectState::DISPLACED)
+            continue;
+
+        std::cout << "Perform PPF matching for object " << object_vec_[i].getID() << std::endl;
+
+        std::vector<v4r::ObjectHypothesesGroup> hypothesis_groups = callRecognizer(object_vec_[i]);
+
+        //remove hypothesis groups with 0 hypothesis
+        hypothesis_groups.erase(std::remove_if(hypothesis_groups.begin(),hypothesis_groups.end(), [](const auto &a){ return a.ohs_.size() == 0; }), hypothesis_groups.end());
+
+        if (hypothesis_groups.size() == 0) {
+            std::cout << "New object. No hypothesis found for object " << object_vec_[i].getID() << std::endl;
+            continue;
+        }
+
+        ObjectHypothesesStruct object_hypotheses;
+        object_hypotheses.object_id = object_vec_[i].getID();
+        object_hypotheses.object_cloud = object_vec_[i].getObjectCloud();
+
+
+        boost::filesystem::path model_path_orig(model_path_);
+        std::string cloud_matches_dir =  model_path_orig.remove_trailing_separator().parent_path().string() + "/matches/object" + std::to_string(object_vec_[i].getID());
+        boost::filesystem::create_directories(cloud_matches_dir);
+        pcl::io::savePCDFile(cloud_matches_dir + "/object.pcd", *object_vec_[i].getObjectCloud());
+
+        // use results
+        for (auto& hg : hypothesis_groups) {
+            std::pair<HypothesesStruct, bool> hypo = filterRecoHypothesis(object_vec_[i], hg.ohs_);
+            if (hypo.second) {
+                object_hypotheses.model_hyp[hypo.first.model_id] = hypo.first;
+
+                pcl::PointCloud<PointNormal>::Ptr model_aligned(new pcl::PointCloud<PointNormal>());
+                pcl::transformPointCloudWithNormals(*(rec_->getModel(std::to_string(hypo.first.model_id))), *model_aligned, hypo.first.transform);
+
+                std::string result_cloud_path = cloud_matches_dir + "/conf_" + std::to_string(hypo.first.fitness.object_conf) + "_" +
+                        std::to_string(hypo.first.fitness.model_conf) + "_model_" + std::to_string(hypo.first.model_id) + "_" +
+                        (ppf_params.ppf_rec_pipeline_.use_color_ ? "_color" : "");
+                saveCloudResults(object_hypotheses.object_cloud, model_aligned, result_cloud_path);
+            }
+        }
+        if (object_hypotheses.model_hyp.size() > 0 ) {
+            global_scene_hypotheses.push_back(object_hypotheses);
+        } else {
+            std::cout << "New object. Couldn't find a hypothesis for object " << object_vec_[i].getID() << std::endl;
+        }
+    }
+    return global_scene_hypotheses;
 }
