@@ -236,6 +236,10 @@ std::vector<PlaneWithObjInd> ExtractObjectsFromPlanes::extractObjectInd(pcl::Poi
         pcl::io::savePCDFileBinary(result_path_ + "/remaining_points" + std::to_string(c) + ".pcd", *remaining_cloud);
 
 
+        //check if the plane is intersecting with the original convex hull of the plane
+        if (!intersectCHWithPlane(convex_hull_pts_, plane_cloud))
+            continue;
+
 
         //Check if the plane is a good plane by removing normals not pointing in the z-direction
         // build the condition
@@ -522,4 +526,32 @@ void ExtractObjectsFromPlanes::shrinkConvexHull(pcl::PointCloud<PointNormal>::Pt
         hull_cloud->points[i].y = hull_cloud->points[i].y + subtract[1]*distance;
         hull_cloud->points[i].z = hull_cloud->points[i].z + subtract[2]*distance;
     }
+}
+
+bool ExtractObjectsFromPlanes::intersectCHWithPlane(pcl::PointCloud<PointXYZ>::Ptr cloud_hull_orig, pcl::PointCloud<PointNormal>::Ptr plane_cloud) {
+    std::vector<int> nan_ind;
+    pcl::removeNaNFromPointCloud(*plane_cloud, *plane_cloud, nan_ind);
+
+     pcl::PointCloud<PointXYZ>::Ptr plane_cloud_xyz (new pcl::PointCloud<PointXYZ>);
+     pcl::copyPointCloud(*plane_cloud, *plane_cloud_xyz);
+
+    pcl::PointCloud<PointXYZ>::Ptr cloud_hull (new pcl::PointCloud<PointXYZ>);
+    std::vector<pcl::Vertices> polygons;
+    pcl::ConvexHull<PointXYZ> chull;
+    chull.setInputCloud (cloud_hull_orig);
+    chull.setDimension(2);
+    chull.reconstruct (*cloud_hull, polygons);
+
+    pcl::PointCloud<PointXYZ>::Ptr intersection_cloud (new pcl::PointCloud<PointXYZ>);
+    pcl::CropHull<PointXYZ> crop_filter;
+    crop_filter.setInputCloud (plane_cloud_xyz);
+    crop_filter.setHullCloud (cloud_hull);
+    crop_filter.setHullIndices (polygons);
+    crop_filter.setDim (2);
+    crop_filter.filter (*intersection_cloud);
+
+    if (intersection_cloud->empty()) {
+        return false;
+    }
+    return true;
 }

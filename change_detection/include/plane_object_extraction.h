@@ -23,6 +23,7 @@
 #include <pcl/filters/conditional_removal.h>
 #include <pcl/search/impl/search.hpp>
 #include <pcl/common/centroid.h>
+#include <pcl/filters/crop_hull.h>
 
 #include "region_growing.h"
 #include "object_matching.h"
@@ -30,6 +31,7 @@
 
 typedef pcl::PointXYZRGBNormal PointNormal;
 typedef pcl::PointXYZRGB PointRGB;
+typedef pcl::PointXYZ PointXYZ;
 
 
 class ExtractObjectsFromPlanes {
@@ -55,6 +57,7 @@ private:
     pcl::PointIndices::Ptr findCorrespondingPlane(pcl::PointCloud<PointNormal>::Ptr cloud, std::vector<pcl::PointIndices> clusters);
     void shrinkConvexHull(pcl::PointCloud<PointNormal>::Ptr hull_cloud, float distance);
     void filter_planar_objects(pcl::PointCloud<PointNormal>::Ptr cloud, pcl::PointIndices::Ptr ind);
+    bool intersectCHWithPlane(pcl::PointCloud<PointXYZ>::Ptr cloud_hull_orig, pcl::PointCloud<PointNormal>::Ptr plane_cloud);
 };
 
 #endif //PLANE_OBJECT_EXTRACTION_H
