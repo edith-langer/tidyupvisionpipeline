@@ -114,7 +114,7 @@ LVResult LocalObjectVerification::computeLV() {
         v4r::apps::PPFRecognizerParameter params;
         FitnessScoreStruct fitness_score  = ObjectMatching::computeModelFitness(curr_object_registered, ref_object_noNans, params);
         result.fitness_score = fitness_score;
-        float confidence = std::max(fitness_score.object_conf, fitness_score.model_conf);
+        float confidence = std::min(fitness_score.object_conf, fitness_score.model_conf);
         pcl::io::savePCDFileBinary(debug_output_path + "/curr_object_aligned.pcd", *curr_object_registered);
         std::stringstream stream;
         stream << std::fixed << std::setprecision(2) << confidence;
