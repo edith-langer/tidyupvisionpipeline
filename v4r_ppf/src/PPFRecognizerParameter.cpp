@@ -74,12 +74,15 @@ void PPFRecognizerParameter::init(boost::program_options::options_description &d
 //  desc.add_options()("min_result_conf_thr",
 //                     po::value<double>(&min_result_conf_thr_)->default_value(min_result_conf_thr_),
 //                     "If the confidence is below that value, the hypothesis gets rejected");
-  desc.add_options()("min_fitness_weight_thr",
-                     po::value<double>(&min_fitness_weight_thr_)->default_value(min_fitness_weight_thr_),
-                     "If the confidence is below that value, the hypothesis gets rejected");
+  desc.add_options()("single_obj_min_fitness_weight_thr",
+                     po::value<double>(&single_obj_min_fitness_weight_thr_)->default_value(single_obj_min_fitness_weight_thr_),
+                     "object AND model fitness must be higher, otherwise hypothesis gets rejected");
+  desc.add_options()("min_avg_fitness_weight_thr",
+                     po::value<double>(&min_avg_fitness_weight_thr_)->default_value(min_avg_fitness_weight_thr_),
+                     "object AND model fitness must be higher, otherwise no avg fitness score gets computed and hypothesis gets rejected");
   desc.add_options()("avg_fitness_weight_thr",
                      po::value<double>(&avg_fitness_weight_thr_)->default_value(avg_fitness_weight_thr_),
-                     "If the confidence is below that value, the hypothesis gets rejected");
+                     "If the avg. confidence of object and model is below that value, the hypothesis gets rejected");
 
   normal_estimator_param_.init(desc, section_name + ".normal_estimator");
   plane_filter_.init(desc, "plane_filter");

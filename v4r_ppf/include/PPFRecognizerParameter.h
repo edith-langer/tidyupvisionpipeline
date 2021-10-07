@@ -135,8 +135,9 @@ struct PPFRecognizerParameter {
 
   //double min_graph_conf_thr_ = 0.2;
   //double min_result_conf_thr_ = 0.75;
-  double min_fitness_weight_thr_ = 0.6;
-  double avg_fitness_weight_thr_ = 0.8;
+  double single_obj_min_fitness_weight_thr_ = 0.8;
+  double min_avg_fitness_weight_thr_ = 0.3;
+  double avg_fitness_weight_thr_ = 0.5;
 
   PPFRecognizerParameter() : cam_(new Intrinsics) {}
 
