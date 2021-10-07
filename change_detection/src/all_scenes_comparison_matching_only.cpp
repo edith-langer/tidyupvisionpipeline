@@ -245,6 +245,9 @@ int main(int argc, char* argv[])
         ppf_model_path = result_path + "/model_objects/";
         boost::filesystem::create_directories(ppf_model_path);
 
+        std::string filtered_obj_by_size_path = result_path + "/filtered_by_size/";
+        boost::filesystem::create_directories(filtered_obj_by_size_path);
+
         pot_removed_obj.clear();
         pot_new_obj.clear();
         ref_displaced_obj.clear();
@@ -283,11 +286,10 @@ int main(int argc, char* argv[])
                                 pcl::PointCloud<PointNormal>::Ptr obj_cloud (new pcl::PointCloud<PointNormal>);
                                 pcl::PointCloud<PointNormal>::Ptr plane_cloud (new pcl::PointCloud<PointNormal>);
                                 if (!readInput(model_path.path().string() + "/3D_model.pcd", obj_cloud))
-                                    return false;
+                                    continue;
                                 if (!readInput(model_path.path().string() + "/plane.pcd", plane_cloud))
-                                    return false;
-                                if (obj_cloud->size() > 3000 || obj_cloud->size() < 200)
-                                    return false;
+                                    continue;
+
                                 DetectedObject model_obj(obj_cloud, plane_cloud);
                                 std::string obj_folder = ppf_model_path + std::to_string(model_obj.getID()); //PPF uses the folder name as model_id!
                                 boost::filesystem::create_directories(obj_folder);
@@ -298,6 +300,9 @@ int main(int argc, char* argv[])
                         }
                     }
 
+                    ChangeDetection::filterUnwantedObjects(ref_objects_vec, min_object_volume, min_object_size_ds, max_object_size_ds, 0.01, 0.9, filtered_obj_by_size_path);
+
+
                     if (boost::filesystem::exists(curr_objs_path)) {
                         for(auto & obj_path : boost::filesystem::directory_iterator(curr_objs_path))
                         {
@@ -307,19 +312,17 @@ int main(int argc, char* argv[])
                                 pcl::PointCloud<PointNormal>::Ptr obj_cloud (new pcl::PointCloud<PointNormal>);
                                 pcl::PointCloud<PointNormal>::Ptr plane_cloud (new pcl::PointCloud<PointNormal>);
                                 if (!readInput(obj_path.path().string() + "/object.pcd", obj_cloud))
-                                    return false;
+                                    continue;
                                 if (!readInput(obj_path.path().string() + "/plane.pcd", plane_cloud))
-                                    return false;
-                                if (obj_cloud->size() > 3000 || obj_cloud->size() < 200)
-                                    return false;
+                                    continue;
+
                                 DetectedObject obj(obj_cloud, plane_cloud);
                                 curr_objects_vec.push_back(obj);
                             }
                         }
                     }
 
-                    ChangeDetection::filterSmallVolumes(ref_objects_vec, min_object_volume, min_object_size);
-                    ChangeDetection::filterSmallVolumes(curr_objects_vec, min_object_volume, min_object_size);
+                    ChangeDetection::filterUnwantedObjects(curr_objects_vec, min_object_volume, min_object_size_ds, max_object_size_ds, 0.01, 0.9,filtered_obj_by_size_path);
 
                     if (curr_objects_vec.size() == 0) { //all objects removed from ref scene
                         for (size_t i = 0; i < ref_objects_vec.size(); i++) {
@@ -346,8 +349,8 @@ int main(int argc, char* argv[])
                     //region growing of static/displaced objects (should create more precise results if e.g. the model was smaller than die object or not precisely aligned
                     ChangeDetection::mergeObjectParts(ref_result, merge_object_parts_folder);
                     ChangeDetection::mergeObjectParts(curr_result, merge_object_parts_folder);
-                    ChangeDetection::filterSmallVolumes(ref_result, min_object_volume, min_object_size);
-                    ChangeDetection::filterSmallVolumes(curr_result, min_object_volume, min_object_size);
+                    ChangeDetection::filterUnwantedObjects(ref_result, min_object_volume, min_object_size_ds, max_object_size_ds, 0.01, 0.9, filtered_obj_by_size_path);
+                    ChangeDetection::filterUnwantedObjects(curr_result, min_object_volume, min_object_size_ds, max_object_size_ds, 0.01, 0.9, filtered_obj_by_size_path);
 
                     //all detected objects labeled as removed (ref_objects) or new (curr_objects) could be placed on another plane
                     updateDetectedObjects(ref_result, curr_result);
@@ -374,13 +377,11 @@ int main(int argc, char* argv[])
                                     return false;
                                 if (!readInput(obj_path.path().string() + "/plane.pcd", plane_cloud))
                                     return false;
-                                if (obj_cloud->size() > 3000 || obj_cloud->size() < 200)
-                                    return false;
                                 DetectedObject obj (obj_cloud, plane_cloud);
                                 curr_objects_vec.push_back(obj);
                             }
                         }
-                        ChangeDetection::filterSmallVolumes(curr_objects_vec, min_object_volume, min_object_size);
+                        ChangeDetection::filterUnwantedObjects(curr_objects_vec, min_object_volume, min_object_size_ds, max_object_size_ds, 0.01, 0.9, filtered_obj_by_size_path);
 
                         std::vector<DetectedObject> ref_result, curr_result;
                         curr_result = curr_objects_vec;
@@ -399,23 +400,21 @@ int main(int argc, char* argv[])
                     if (boost::filesystem::exists(ref_objs_path)) {
                         std::vector<DetectedObject> ref_objects_vec;
 
-                        for(auto & obj_path : boost::filesystem::directory_iterator(ref_objs_path))
+                        for(auto & model_path : boost::filesystem::directory_iterator(ref_objs_path))
                         {
-                            if (boost::filesystem::is_directory(obj_path.status()))
+                            if (boost::filesystem::is_directory(model_path.status()))
                             {
                                 pcl::PointCloud<PointNormal>::Ptr obj_cloud (new pcl::PointCloud<PointNormal>);
                                 pcl::PointCloud<PointNormal>::Ptr plane_cloud (new pcl::PointCloud<PointNormal>);
-                                if (!readInput(obj_path.path().string() + "/3D_model.pcd", obj_cloud))
+                                if (!readInput(model_path.path().string() + "/3D_model.pcd", obj_cloud))
                                     return false;
-                                if (!readInput(obj_path.path().string() + "/plane.pcd", plane_cloud))
-                                    return false;
-                                if (obj_cloud->size() > 3000 || obj_cloud->size() < 200)
+                                if (!readInput(model_path.path().string() + "/plane.pcd", plane_cloud))
                                     return false;
                                 DetectedObject obj (obj_cloud, plane_cloud);
                                 ref_objects_vec.push_back(obj);
                             }
                         }
-                        ChangeDetection::filterSmallVolumes(ref_objects_vec, min_object_volume, min_object_size);
+                        ChangeDetection::filterUnwantedObjects(ref_objects_vec, min_object_volume, min_object_size_ds, max_object_size_ds, 0.01, 0.9, filtered_obj_by_size_path);
 
                         std::vector<DetectedObject> ref_result, curr_result;
                         ref_result = ref_objects_vec;
@@ -441,8 +440,8 @@ int main(int argc, char* argv[])
             ChangeDetection::mergeObjectParts(ref_result, merge_object_parts_folder);
             ChangeDetection::mergeObjectParts(curr_result, merge_object_parts_folder);
 
-            ChangeDetection::filterSmallVolumes(ref_result, min_object_volume, min_object_size);
-            ChangeDetection::filterSmallVolumes(curr_result, min_object_volume, min_object_size);
+            ChangeDetection::filterUnwantedObjects(ref_result, min_object_volume, min_object_size_ds, max_object_size_ds, 0.01, 0.9, filtered_obj_by_size_path);
+            ChangeDetection::filterUnwantedObjects(curr_result, min_object_volume, min_object_size_ds, max_object_size_ds, 0.01, 0.9, filtered_obj_by_size_path);
 
             updateDetectedObjects(ref_result, curr_result);
         }

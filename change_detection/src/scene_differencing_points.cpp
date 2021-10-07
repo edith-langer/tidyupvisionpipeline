@@ -20,9 +20,9 @@ void SceneDifferencingPoints::setDistThreshold(double thr) {
  * @param scene2
  * @return a point cloud containing points that are in scene1, but not in scene2
  */
-SceneDifferencingPoints::Cloud::Ptr SceneDifferencingPoints::computeDifference(Cloud::Ptr scene1, Cloud::Ptr scene2, std::vector<int> &src_indices, std::vector<int> &corr_ind) {
-    Cloud::Ptr source = scene1;
-    Cloud::Ptr target = scene2;
+SceneDifferencingPoints::Cloud::Ptr SceneDifferencingPoints::computeDifference(Cloud::ConstPtr scene1, Cloud::ConstPtr scene2, std::vector<int> &src_indices, std::vector<int> &corr_ind) {
+    Cloud::ConstPtr source = scene1;
+    Cloud::ConstPtr target = scene2;
     Cloud::Ptr diff(new Cloud());
 
     // We're interested in a single nearest neighbor only

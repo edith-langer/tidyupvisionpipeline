@@ -250,9 +250,9 @@ std::vector<PlaneWithObjInd> ExtractObjectsFromPlanes::extractObjectInd(pcl::Poi
         condrem.filter (*cloud_plane_filtered);
 
         //remove nans before checking size
-        pcl::PointCloud<PointNormal>::Ptr nan_cloud(new pcl::PointCloud<PointNormal>);
-        pcl::removeNaNFromPointCloud(*cloud_plane_filtered, *nan_cloud, nan_ind);
-        if (nan_cloud->size () < 30)
+        pcl::PointCloud<PointNormal>::Ptr plane_filtered_wo_nans_cloud(new pcl::PointCloud<PointNormal>);
+        pcl::removeNaNFromPointCloud(*cloud_plane_filtered, *plane_filtered_wo_nans_cloud, nan_ind);
+        if (plane_filtered_wo_nans_cloud->size () < 30)
         {
             std::cerr << "Not enough points left after filtering the plane for wrong normals (< 30) " << std::endl;
             continue; //return empty object
@@ -275,14 +275,17 @@ std::vector<PlaneWithObjInd> ExtractObjectsFromPlanes::extractObjectInd(pcl::Poi
                 c_ind->indices.insert(std::end(c_ind->indices), std::begin(cluster_indices_normals.at(i).indices), std::end(cluster_indices_normals.at(i).indices));
         }
         pcl::ExtractIndices<PointNormal> extract_normal;
+        pcl::PointCloud<PointNormal>::Ptr cloud_plane_filtered_notOrganized(new pcl::PointCloud<PointNormal>);
         extract_normal.setInputCloud(cloud_plane_filtered);
         extract_normal.setIndices (c_ind);
         extract_normal.setNegative (false);
-        extract_normal.filter (*cloud_plane_filtered);
-        if (cloud_plane_filtered->size()< 30) {
+        extract_normal.filter (*cloud_plane_filtered_notOrganized);
+        if (cloud_plane_filtered_notOrganized->size()< 30) {
             std::cerr << "Not enough points left after filtering the plane for small cluster (< 30) " << std::endl;
             continue; //return empty object
         }
+        extract_normal.setKeepOrganized(true);
+        extract_normal.filter(*cloud_plane_filtered);
 
         //set the plane inliers to the filtered outcome
         //update z-value
@@ -301,11 +304,11 @@ std::vector<PlaneWithObjInd> ExtractObjectsFromPlanes::extractObjectInd(pcl::Poi
 
 
         //compute convex hull
-        std::cout << "Input to concave hull computation has " << cloud_plane_filtered->size() << " points" << std::endl;
+        std::cout << "Input to concave hull computation has " << cloud_plane_filtered_notOrganized->size() << " points" << std::endl;
         // Create a Convex Hull representation of the projected inliers (cloud must not have NANs!)
         pcl::PointCloud<PointNormal>::Ptr cloud_hull (new pcl::PointCloud<PointNormal>);
         pcl::ConvexHull<PointNormal> chull;
-        chull.setInputCloud (cloud_plane_filtered);
+        chull.setInputCloud (cloud_plane_filtered_notOrganized);
         chull.setDimension(2);
         //chull.setAlpha(50);
         chull.reconstruct (*cloud_hull);
@@ -384,7 +387,7 @@ std::vector<PlaneWithObjInd> ExtractObjectsFromPlanes::extractObjectInd(pcl::Poi
             if (object_indices->indices.size() > 0) {
 
                 pcl::PointCloud<PointNormal>::Ptr objects(new pcl::PointCloud<PointNormal>);
-                extract.setInputCloud(cropped_cloud);
+                extract.setInputCloud(orig_cloud_);
                 extract.setNegative(false);
                 extract.setIndices(object_indices);
                 extract.setKeepOrganized(true);
@@ -392,7 +395,7 @@ std::vector<PlaneWithObjInd> ExtractObjectsFromPlanes::extractObjectInd(pcl::Poi
                 pcl::io::savePCDFileBinary(result_path_ + "/objects_filtered" + std::to_string(c) + ".pcd", *objects);
 
                 pcl::PointCloud<PointNormal>::Ptr plane(new pcl::PointCloud<PointNormal>);
-                extract.setInputCloud(cropped_cloud);
+                extract.setInputCloud(orig_cloud_);
                 extract.setNegative(false);
                 extract.setIndices(plane_ind);
                 extract.setKeepOrganized(true);
@@ -500,7 +503,7 @@ void ExtractObjectsFromPlanes::filter_planar_objects(pcl::PointCloud<PointNormal
         cloud_cluster->height = 1;
         cloud_cluster->is_dense = true;
 
-        if (ObjectMatching::isObjectPlanar(cloud_cluster, 0.01, 0.9)) {
+        if (isObjectPlanar(cloud_cluster, 0.01, 0.9)) {
             std::cerr << "Cluster is a plane. We remove it." << std::endl;
             ind_to_be_removed.insert(std::end(ind_to_be_removed), std::begin(cluster_indices.at(i).indices), std::end(cluster_indices.at(i).indices));
         }
@@ -528,12 +531,12 @@ void ExtractObjectsFromPlanes::shrinkConvexHull(pcl::PointCloud<PointNormal>::Pt
     }
 }
 
-bool ExtractObjectsFromPlanes::intersectCHWithPlane(pcl::PointCloud<PointXYZ>::Ptr cloud_hull_orig, pcl::PointCloud<PointNormal>::Ptr plane_cloud) {
-    std::vector<int> nan_ind;
-    pcl::removeNaNFromPointCloud(*plane_cloud, *plane_cloud, nan_ind);
+bool ExtractObjectsFromPlanes::intersectCHWithPlane(pcl::PointCloud<PointXYZ>::ConstPtr cloud_hull_orig, pcl::PointCloud<PointNormal>::ConstPtr plane_cloud) {
+    pcl::PointCloud<PointXYZ>::Ptr plane_cloud_xyz (new pcl::PointCloud<PointXYZ>);
+    pcl::copyPointCloud(*plane_cloud, *plane_cloud_xyz);
 
-     pcl::PointCloud<PointXYZ>::Ptr plane_cloud_xyz (new pcl::PointCloud<PointXYZ>);
-     pcl::copyPointCloud(*plane_cloud, *plane_cloud_xyz);
+    std::vector<int> nan_ind;
+    pcl::removeNaNFromPointCloud(*plane_cloud_xyz, *plane_cloud_xyz, nan_ind);
 
     pcl::PointCloud<PointXYZ>::Ptr cloud_hull (new pcl::PointCloud<PointXYZ>);
     std::vector<pcl::Vertices> polygons;

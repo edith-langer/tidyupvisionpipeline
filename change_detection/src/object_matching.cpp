@@ -83,17 +83,15 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
 
     //call the recognizer, filter hypotheses
     global_scene_hypotheses = createHypotheses();
-    if (global_scene_hypotheses.size() == 0)
-        return {};
 
     /// first try to match single standing objects --> therefore used min_fitness_weight for confidence computation between two objects
     /// if we find a match, we assume that the whole cluster is one object (because the confidence has to be high for both model and object)
     /// remove hypothesis with a confidence lower than min_fitness_thr
     std::function<float(FitnessScoreStruct)> minFitness =
             [](FitnessScoreStruct s) {
-                return std::min(s.model_conf, s.object_conf);
+        return std::min(s.model_conf, s.object_conf);
     };
-    std::vector<Match> model_obj_matches_single_standing = weightedGraphMatching(global_scene_hypotheses, minFitness,  ppf_params.min_fitness_weight_thr_);
+    std::vector<Match> model_obj_matches_single_standing = weightedGraphMatching(global_scene_hypotheses, minFitness,  ppf_params.single_obj_min_fitness_weight_thr_);
     for (size_t m = 0; m < model_obj_matches_single_standing.size(); m++) {
         Match &match = model_obj_matches_single_standing[m];
         int obj_id = match.object_id;
@@ -102,7 +100,8 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
         std::vector<DetectedObject>::iterator ro_iter = std::find_if( model_vec_.begin(), model_vec_.end(),[&model_id](DetectedObject const &o) {return o.getID() == model_id; });
 
         //compute distance between object and model
-        float dist = estimateDistance(co_iter->getObjectCloud(), ro_iter->getObjectCloud(), match.transform);
+        //float dist = estimateDistance(co_iter->getObjectCloud(), ro_iter->getObjectCloud(), match.transform);
+        float dist = computeMeanPointDistance(co_iter->getObjectCloud(), ro_iter->getObjectCloud());
         bool is_static = dist < max_dist_for_being_static;
 
         ro_iter->match_ = match;
@@ -123,22 +122,22 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
             std::map<int, HypothesesStruct> & model_h = global_scene_hypotheses[g].model_hyp;
             if (model_h.find(model_id) != model_h.end())
                 model_h.erase(model_id);
-            }
+        }
     }
     //TODO: maybe delete global hypotheses with model_hyp.size == 0
 
     //now try to split clustered objects using bipartite graph in a loop
     //to be able to separate objects, do this as long as a result can be found
-    std::map<int, pcl::PointCloud<PointNormal>::Ptr> model_id_cloud;
+    std::map<int, pcl::PointCloud<PointNormal>::ConstPtr> model_id_cloud;
     for (size_t m = 0; m < model_vec_.size(); m++) {
         model_id_cloud.insert(std::make_pair(model_vec_[m].getID(), model_vec_[m].getObjectCloud()));
     }
 
     std::function<float(FitnessScoreStruct)> avgFitness =
             [](FitnessScoreStruct s) {
-            if (std::min(s.object_conf, s.model_conf) < 0.3)
-                return 0.0f;
-            return (s.object_conf + s.model_conf) / 2;
+        if (std::min(s.object_conf, s.model_conf) < ppf_params.min_avg_fitness_weight_thr_)
+            return 0.0f;
+        return (s.object_conf + s.model_conf) / 2;
     };
     std::vector<Match> model_obj_matches;
     std::vector<Match> model_obj_matches_single_run = weightedGraphMatching(global_scene_hypotheses, avgFitness, ppf_params.avg_fitness_weight_thr_);
@@ -154,11 +153,12 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
             std::vector<DetectedObject>::iterator ro_iter = std::find_if( model_vec_.begin(), model_vec_.end(),[&model_id](DetectedObject const &o) {return o.getID() == model_id; });
 
             //get the original model and object clouds for the  match
-            const pcl::PointCloud<PointNormal>::Ptr model_cloud = ro_iter->getObjectCloud();
-            const pcl::PointCloud<PointNormal>::Ptr object_cloud = co_iter->getObjectCloud();
+            const pcl::PointCloud<PointNormal>::ConstPtr model_cloud = ro_iter->getObjectCloud();
+            const pcl::PointCloud<PointNormal>::ConstPtr object_cloud = co_iter->getObjectCloud();
 
             //compute distance between object and model
-            float dist = estimateDistance(object_cloud, model_cloud, match.transform);
+            //float dist = estimateDistance(object_cloud, model_cloud, match.transform);
+            float dist = computeMeanPointDistance(object_cloud, model_cloud);
             bool is_static = dist < max_dist_for_being_static;
 
             pcl::PointCloud<PointNormal>::Ptr model_aligned(new pcl::PointCloud<PointNormal>());
@@ -172,7 +172,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
 
             //remove very small clusters from the diff
             std::vector<int> small_cluster_ind;
-            ObjectMatching::clusterOutliersBySize(model_diff_cloud, small_cluster_ind, 0.014, min_object_size);
+            ObjectMatching::clusterOutliersBySize(model_diff_cloud, small_cluster_ind, 0.014, min_object_size_ds);
             for (int i = small_cluster_ind.size() - 1; i >= 0; i--) {
                 model_diff_cloud->points.erase(model_diff_cloud->points.begin() + small_cluster_ind[i]);
                 diff_ind.erase(diff_ind.begin() + small_cluster_ind[i]);
@@ -180,12 +180,13 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
             model_diff_cloud->width = model_diff_cloud->points.size();
             //TODO add the small_Cluster_ind to the model_cloud
 
-            //if the leftover is just a plane, remove it
-            if (isObjectPlanar(model_diff_cloud, 0.01, 0.9))
+            //if the leftover is just a plane, too small or has little volume, remove it
+            pcl::PointCloud<PointNormal>::Ptr ds_cloud = downsampleCloudVG(model_diff_cloud, ds_leaf_size_LV);
+            if (isObjectUnwanted(ds_cloud, min_object_volume, min_object_size_ds, max_object_size_ds, 0.01, 0.9))
                 model_diff_cloud->clear();
 
             //nothing is left of the diff --> the whole model cluster is a match
-            if (model_diff_cloud->size() == 0 || diff_ind.size() < min_object_size || isObjectPlanar(model_diff_cloud, 0.01, 0.9)) { //if less than 100 points left, we do not split the model object
+            if (model_diff_cloud->size() == 0 ) { //we do not split the model object
                 if (is_static) {
                     ro_iter->state_ = ObjectState::STATIC;
                     ro_iter->match_ = match;
@@ -199,17 +200,11 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
             else {
                 //the part that is matched
                 pcl::PointCloud<PointNormal>::Ptr matched_model_part(new pcl::PointCloud<PointNormal>);
-                pcl::ExtractIndices<PointNormal> extract;
-                extract.setInputCloud (model_aligned);
-                pcl::PointIndices::Ptr c_ind(new pcl::PointIndices());
-                c_ind->indices = diff_ind;
-                extract.setIndices(c_ind);
-                extract.setKeepOrganized(false);
-                extract.setNegative (true);
-                extract.filter(*matched_model_part);
+                model_diff_cloud.reset(new pcl::PointCloud<PointNormal>);
+                matchedPartGrowing(model_aligned, matched_model_part, model_diff_cloud, match.fitness_score.model_overlapping_pts);
 
-                //re-compute fitness for the splitted part
-                match.fitness_score = computeModelFitness(object_cloud, matched_model_part, ppf_params);
+//                //re-compute fitness for the splitted part
+//                match.fitness_score = computeModelFitness(object_cloud, matched_model_part, ppf_params);
 
                 //transform back to original scene
                 pcl::transformPointCloudWithNormals(*matched_model_part, *matched_model_part, match.transform.inverse());
@@ -229,7 +224,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
             pcl::PointCloud<PointNormal>::Ptr object_diff_cloud = scene_diff.computeDifference(object_cloud, model_aligned, diff_ind, corresponding_ind);
 
             small_cluster_ind.clear();
-            ObjectMatching::clusterOutliersBySize(object_diff_cloud, small_cluster_ind, 0.014, min_object_size);
+            ObjectMatching::clusterOutliersBySize(object_diff_cloud, small_cluster_ind, 0.014, min_object_size_ds);
             for (int i = small_cluster_ind.size() - 1; i >= 0; i--) {
                 object_diff_cloud->points.erase(object_diff_cloud->points.begin() + small_cluster_ind[i]);
                 diff_ind.erase(diff_ind.begin() + small_cluster_ind[i]);
@@ -237,11 +232,12 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
             object_diff_cloud->width = object_diff_cloud->points.size();
             //TODO add the small_Cluster_ind to the object_cloud
 
-            //if the leftover is just a plane, remove it
-            if (isObjectPlanar(object_diff_cloud, 0.01, 0.9))
+            //if the leftover is just a plane, too small or has little volume, remove it
+            ds_cloud = downsampleCloudVG(object_diff_cloud, ds_leaf_size_LV);
+            if (isObjectUnwanted(ds_cloud, min_object_volume, min_object_size_ds, max_object_size_ds, 0.01, 0.9))
                 object_diff_cloud->clear();
 
-            if (object_diff_cloud->size() == 0 || diff_ind.size() < min_object_size || isObjectPlanar(object_diff_cloud, 0.01, 0.9)) { //if less than 100 points left, we do not split the object
+            if (object_diff_cloud->size() == 0) { //if less than 100 points left, we do not split the object
                 if (is_static) {
                     co_iter->state_ = ObjectState::STATIC;
                     co_iter->match_ = match;
@@ -255,17 +251,11 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
             else {
                 //the part that is matched
                 pcl::PointCloud<PointNormal>::Ptr matched_object_part(new pcl::PointCloud<PointNormal>);
-                pcl::ExtractIndices<PointNormal> extract;
-                pcl::PointIndices::Ptr c_ind(new pcl::PointIndices());
-                extract.setInputCloud (object_cloud);
-                c_ind->indices = diff_ind;
-                extract.setIndices(c_ind);
-                extract.setKeepOrganized(false);
-                extract.setNegative (true);
-                extract.filter(*matched_object_part);
+                object_diff_cloud.reset(new pcl::PointCloud<PointNormal>);
+                matchedPartGrowing(object_cloud, matched_object_part, object_diff_cloud, match.fitness_score.object_overlapping_pts);
 
-                //re-compute fitness for the splitted part
-                match.fitness_score = computeModelFitness(matched_object_part, model_aligned, ppf_params);
+//                //re-compute fitness for the splitted part
+//                match.fitness_score = computeModelFitness(matched_object_part, model_aligned, ppf_params);
 
                 //the matched part of the object
                 co_iter->setObjectCloud(matched_object_part);
@@ -287,6 +277,12 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
                 //pcl::io::savePCDFile("/home/edith/object_part.pcd", *matched_object_part);
                 //pcl::io::savePCDFile("/home/edith/object_remaining.pcd", *object_diff_cloud);
             }
+
+            //recompute fitness, otherwise overlapping_point_ids do not match with the stored cloud
+            pcl::transformPointCloudWithNormals(*(ro_iter->getObjectCloud()), *model_aligned, match.transform);
+            FitnessScoreStruct f = computeModelFitness(co_iter->getObjectCloud(), model_aligned, ppf_params);
+            ro_iter->match_.fitness_score = f;
+            co_iter->match_.fitness_score = f;
 
 
             //ATTENTION: The ro_iter is invalid now because of the push_back. Vector re-allocates and invalidates pointers
@@ -404,7 +400,7 @@ std::vector<Match> ObjectMatching::weightedGraphMatching(std::vector<ObjectHypot
 //check if hypothesis is below floor (in hypotheses_verification.cpp a method exists using the convex hull)
 //compute the z_value_threshold from the supporting plane
 //checking for flying objects would not allow to keep true match of stacked objects
-bool ObjectMatching::isBelowPlane(pcl::PointCloud<PointNormal>::Ptr model, pcl::PointCloud<PointNormal>::Ptr plane_cloud) {
+bool ObjectMatching::isBelowPlane(pcl::PointCloud<PointNormal>::ConstPtr model, pcl::PointCloud<PointNormal>::ConstPtr plane_cloud) {
 
     PointNormal minPoint, maxPoint;
     pcl::getMinMax3D(*model, minPoint, maxPoint);
@@ -450,7 +446,7 @@ bool ObjectMatching::isBelowPlane(pcl::PointCloud<PointNormal>::Ptr model, pcl::
 
 
 
-FitnessScoreStruct ObjectMatching::computeModelFitness(pcl::PointCloud<PointNormal>::Ptr object, pcl::PointCloud<PointNormal>::Ptr model,
+FitnessScoreStruct ObjectMatching::computeModelFitness(pcl::PointCloud<PointNormal>::ConstPtr object, pcl::PointCloud<PointNormal>::ConstPtr model,
                                                        v4r::apps::PPFRecognizerParameter param) {
     std::vector<v4r::ModelSceneCorrespondence> model_object_c;
 
@@ -497,7 +493,10 @@ FitnessScoreStruct ObjectMatching::computeModelFitness(pcl::PointCloud<PointNorm
                 //color_score = c.color_distance_ < param.hv_.inlier_threshold_color_;
                 color_score = c.color_distance_ > param.hv_.inlier_threshold_color_ ? 0.0 :  1-(c.color_distance_ / param.hv_.inlier_threshold_color_);
             }
-            c.fitness_ = 0.7*normal_score + 0.3*color_score;
+            if (normal_score == 0.0 || color_score == 0.0)
+                c.fitness_ = 0.0;
+            else
+                c.fitness_ = 0.7*normal_score + 0.3*color_score;
             if (c.fitness_ != c.fitness_)
                 std::cout << "fitness is nan" << std::endl;
             //c.fitness_ = normal_score * color_score; //either 0 or 1
@@ -565,7 +564,7 @@ FitnessScoreStruct ObjectMatching::computeModelFitness(pcl::PointCloud<PointNorm
 
 //estimate the distance between model and object
 //transform the model to the object coordinate system, find point pairs and based on these compute the distance between the original model and the object
-float ObjectMatching::estimateDistance(const pcl::PointCloud<PointNormal>::Ptr object_cloud, const pcl::PointCloud<PointNormal>::Ptr model_cloud, const Eigen::Matrix4f transform) {
+float ObjectMatching::estimateDistance(const pcl::PointCloud<PointNormal>::ConstPtr object_cloud, const pcl::PointCloud<PointNormal>::ConstPtr model_cloud, const Eigen::Matrix4f transform) {
     pcl::PointCloud<PointNormal>::Ptr model_transformed (new pcl::PointCloud<PointNormal>);
     pcl::transformPointCloudWithNormals(*model_cloud, *model_transformed, transform);
 
@@ -586,7 +585,33 @@ float ObjectMatching::estimateDistance(const pcl::PointCloud<PointNormal>::Ptr o
     return sum_eucl_dist/nr_overlapping_pts;
 }
 
-void ObjectMatching::saveCloudResults(pcl::PointCloud<PointNormal>::Ptr object_cloud, pcl::PointCloud<PointNormal>::Ptr model_aligned, std::string path) {
+float ObjectMatching::computeMeanPointDistance(pcl::PointCloud<PointNormal>::ConstPtr ref_object, pcl::PointCloud<PointNormal>::ConstPtr curr_obj) {
+    PointNormal ref_p_mean, curr_p_mean;
+    ref_p_mean.x = ref_p_mean.y = ref_p_mean.z = 0.0f;
+    curr_p_mean = ref_p_mean;
+
+    for (size_t i = 0; i < ref_object->size(); i++) {
+        ref_p_mean.x += ref_object->points[i].x;
+        ref_p_mean.y += ref_object->points[i].y;
+        ref_p_mean.z += ref_object->points[i].z;
+    }
+    ref_p_mean.x = ref_p_mean.x/ref_object->size();
+    ref_p_mean.y = ref_p_mean.y/ref_object->size();
+    ref_p_mean.z = ref_p_mean.z/ref_object->size();
+
+    for (size_t i = 0; i < curr_obj->size(); i++) {
+        curr_p_mean.x += curr_obj->points[i].x;
+        curr_p_mean.y += curr_obj->points[i].y;
+        curr_p_mean.z += curr_obj->points[i].z;
+    }
+    curr_p_mean.x = curr_p_mean.x/curr_obj->size();
+    curr_p_mean.y = curr_p_mean.y/curr_obj->size();
+    curr_p_mean.z = curr_p_mean.z/curr_obj->size();
+
+    return pcl::euclideanDistance(ref_p_mean, curr_p_mean);
+}
+
+void ObjectMatching::saveCloudResults(pcl::PointCloud<PointNormal>::ConstPtr object_cloud, pcl::PointCloud<PointNormal>::ConstPtr model_aligned, std::string path) {
 
     //assign the matched model another label for better visualization
     pcl::PointXYZRGBL init_label_point;
@@ -601,8 +626,8 @@ void ObjectMatching::saveCloudResults(pcl::PointCloud<PointNormal>::Ptr object_c
 
 
 //returns all valid clusters and indices that were removed are stored in filtered_ind
-//the input cloud does not change!
-std::vector<pcl::PointIndices> ObjectMatching::clusterOutliersBySize(const pcl::PointCloud<PointNormal>::Ptr cloud, std::vector<int> &filtered_ind, float cluster_thr,
+//the input cloud does not change! make sure is_dense=false is set if nans could exist
+std::vector<pcl::PointIndices> ObjectMatching::clusterOutliersBySize(const pcl::PointCloud<PointNormal>::ConstPtr cloud, std::vector<int> &filtered_ind, float cluster_thr,
                                                                      int min_cluster_size, int max_cluster_size) {
     //clean up small things
     std::vector<pcl::PointIndices> cluster_indices;
@@ -612,14 +637,10 @@ std::vector<pcl::PointIndices> ObjectMatching::clusterOutliersBySize(const pcl::
     //check if cloud only consists of nans
     std::vector<int> nan_ind;
     pcl::PointCloud<PointNormal>::Ptr no_nans_cloud(new pcl::PointCloud<PointNormal>);
-    cloud->is_dense = false;
     pcl::removeNaNFromPointCloud(*cloud, *no_nans_cloud, nan_ind);
     if (no_nans_cloud->size() == 0) {
         return cluster_indices;
     }
-    if (no_nans_cloud->size() == cloud->size())
-        cloud->is_dense = true;
-
 
     pcl::search::KdTree<PointNormal>::Ptr tree (new pcl::search::KdTree<PointNormal>);
     tree->setInputCloud (cloud);
@@ -647,29 +668,7 @@ std::vector<pcl::PointIndices> ObjectMatching::clusterOutliersBySize(const pcl::
     return cluster_indices;
 }
 
-bool ObjectMatching::isObjectPlanar(pcl::PointCloud<PointNormal>::Ptr object, float plane_dist_thr, float plane_acc_thr) {
-    pcl::SACSegmentation<PointNormal> seg;
-    pcl::PointIndices::Ptr inliers (new pcl::PointIndices);
-    pcl::ModelCoefficients::Ptr coefficients (new pcl::ModelCoefficients);
 
-    seg.setOptimizeCoefficients (true);
-    seg.setModelType (pcl::SACMODEL_PLANE);
-    seg.setMethodType (pcl::SAC_RANSAC);
-    seg.setMaxIterations (100);
-    seg.setDistanceThreshold (plane_dist_thr);
-    seg.setInputCloud (object);
-    seg.segment (*inliers, *coefficients);
-
-    if (inliers->indices.size() == 0)
-        return false;
-    //I don't know why this is happening, but it is apprently not a correct solution and would include all points as plane inliers
-    if (coefficients->values[0] == 0 && coefficients->values[1] == 0 && coefficients->values[2] == 0 && coefficients->values[3] == 0)
-        return false;
-
-    if (inliers->indices.size()/object->size() > plane_acc_thr)
-        return true;
-    return false;
-}
 
 std::vector<v4r::ObjectHypothesesGroup> ObjectMatching::callRecognizer(DetectedObject obj) {
     double ppf_rec_time_sum = 0.0;
@@ -818,4 +817,62 @@ std::vector<ObjectHypothesesStruct> ObjectMatching::createHypotheses() {
         }
     }
     return global_scene_hypotheses;
+}
+
+//starting from the good_pt_ids region growing is called
+void ObjectMatching::matchedPartGrowing(pcl::PointCloud<PointNormal>::ConstPtr obj_cloud, pcl::PointCloud<PointNormal>::Ptr matched_part,
+                                                                     pcl::PointCloud<PointNormal>::Ptr remaining_part, std::vector<int> good_pt_ids) {
+
+    pcl::PointCloud<PointNormal>::Ptr good_pts(new pcl::PointCloud<PointNormal>);
+
+    pcl::ExtractIndices<PointNormal> extract;
+    extract.setInputCloud (obj_cloud);
+    pcl::PointIndices::Ptr good_pt_ind(new pcl::PointIndices);
+    good_pt_ind->indices = good_pt_ids;
+    extract.setIndices (good_pt_ind);
+    extract.setNegative (false);
+    extract.setKeepOrganized(false);
+    extract.filter(*good_pts);
+
+
+    pcl::PointCloud<pcl::Normal>::Ptr scene_normals(new pcl::PointCloud<pcl::Normal>);
+    pcl::copyPointCloud(*obj_cloud, *scene_normals);
+    RegionGrowing<PointNormal, PointNormal> region_growing(obj_cloud, good_pts, scene_normals, false, 15.0, 5);
+    std::vector<int> add_object_ind = region_growing.compute();
+
+    pcl::PointCloud<PointNormal>::Ptr extracted_cloud(new pcl::PointCloud<PointNormal>);
+    extract.setInputCloud (obj_cloud);
+    pcl::PointIndices::Ptr obj_ind(new pcl::PointIndices);
+    obj_ind->indices = add_object_ind;
+    extract.setIndices (obj_ind);
+    extract.setNegative (false);
+    extract.setKeepOrganized(false);
+    extract.filter(*matched_part);
+
+    extract.setNegative (true);
+    extract.setKeepOrganized(false);
+    extract.filter(*remaining_part);
+
+    //remove very small clusters
+    std::vector<int> small_cluster_ind;
+    ObjectMatching::clusterOutliersBySize(remaining_part, small_cluster_ind, 0.014, min_object_size_ds);
+
+    pcl::PointCloud<PointNormal>::Ptr small_cluster_cloud(new pcl::PointCloud<PointNormal>);
+    extract.setInputCloud (remaining_part);
+    obj_ind->indices = small_cluster_ind;
+    extract.setIndices (obj_ind);
+    extract.setNegative (false);
+    extract.setKeepOrganized(false);
+    extract.filter(*small_cluster_cloud);
+    *matched_part += *small_cluster_cloud;
+
+    extract.setNegative (true);
+    extract.setKeepOrganized(false);
+    extract.filter(*remaining_part);
+
+    pcl::PointCloud<PointNormal>::Ptr ds_cloud = downsampleCloudVG(remaining_part, ds_leaf_size_LV);
+    if (!remaining_part->empty() && isObjectUnwanted(ds_cloud, min_object_volume, min_object_size_ds, max_object_size_ds, 0.01, 0.9)) {
+        pcl::copyPointCloud(*obj_cloud, *matched_part);
+        remaining_part->clear();
+    }
 }

@@ -57,7 +57,7 @@ private:
     pcl::PointIndices::Ptr findCorrespondingPlane(pcl::PointCloud<PointNormal>::Ptr cloud, std::vector<pcl::PointIndices> clusters);
     void shrinkConvexHull(pcl::PointCloud<PointNormal>::Ptr hull_cloud, float distance);
     void filter_planar_objects(pcl::PointCloud<PointNormal>::Ptr cloud, pcl::PointIndices::Ptr ind);
-    bool intersectCHWithPlane(pcl::PointCloud<PointXYZ>::Ptr cloud_hull_orig, pcl::PointCloud<PointNormal>::Ptr plane_cloud);
+    bool intersectCHWithPlane(pcl::PointCloud<PointXYZ>::ConstPtr cloud_hull_orig, pcl::PointCloud<PointNormal>::ConstPtr plane_cloud);
 };
 
 #endif //PLANE_OBJECT_EXTRACTION_H

@@ -425,9 +425,10 @@ int main(int argc, char* argv[])
                 all_scene_paths.push_back(p);
         }
     }
+    std::sort(all_scene_paths.begin(), all_scene_paths.end());
 
     std::string timestamp = getCurrentTime();
-    base_result_path =  base_result_path + "/" + timestamp + (do_LV_before_matching ? "_withLV":"" ) + "/";
+    base_result_path =  base_result_path + "/" + timestamp + (do_LV_before_matching ? "_withLV":"" ) + "_filterPlanarObj_ds05/";
     //----------------------------setup result folder----------------------------------
     //start at 1 because element 0 is scene1 without objects
     for (size_t idx = 1; idx < all_scene_paths.size(); idx++)
@@ -525,21 +526,21 @@ int main(int argc, char* argv[])
                     updateDetectedObjects(ref_result, curr_result);
 
 
-                    //after collecting potential new and removed objects from the plane, try to match them
-                    if (pot_removed_obj.size() != 0 && pot_new_obj.size() != 0) {
-                        //transform map into vec to be able to call object matching
-                        std::vector<DetectedObject> pot_rem_obj_vec, pot_new_obj_vec;
-                        pot_rem_obj_vec = fromMapToValVec(pot_removed_obj);
-                        pot_new_obj_vec = fromMapToValVec(pot_new_obj);
-                        ObjectMatching matching(pot_rem_obj_vec, pot_new_obj_vec, ppf_model_path, ppf_config_path_path);
-                        ref_result.clear(); curr_result.clear();
-                        matching.compute(ref_result, curr_result);
+//                    //after collecting potential new and removed objects from the plane, try to match them
+//                    if (pot_removed_obj.size() != 0 && pot_new_obj.size() != 0) {
+//                        //transform map into vec to be able to call object matching
+//                        std::vector<DetectedObject> pot_rem_obj_vec, pot_new_obj_vec;
+//                        pot_rem_obj_vec = fromMapToValVec(pot_removed_obj);
+//                        pot_new_obj_vec = fromMapToValVec(pot_new_obj);
+//                        ObjectMatching matching(pot_rem_obj_vec, pot_new_obj_vec, ppf_model_path, ppf_config_path_path);
+//                        ref_result.clear(); curr_result.clear();
+//                        matching.compute(ref_result, curr_result);
 
-                        ChangeDetection::mergeObjectParts(ref_result, merge_object_parts_folder);
-                        ChangeDetection::mergeObjectParts(curr_result, merge_object_parts_folder);
+//                        ChangeDetection::mergeObjectParts(ref_result, merge_object_parts_folder);
+//                        ChangeDetection::mergeObjectParts(curr_result, merge_object_parts_folder);
 
-                        updateDetectedObjects(ref_result, curr_result);
-                    }
+//                        updateDetectedObjects(ref_result, curr_result);
+//                    }
                 }
             }
 
@@ -730,7 +731,7 @@ int main(int argc, char* argv[])
                 *ref_cloud_merged += *cropped_cloud;
             }
             pcl::PointCloud<PointNormal>::Ptr ref_merged_ds(new pcl::PointCloud<PointNormal>);
-            ref_merged_ds = ChangeDetection::downsampleCloud(ref_cloud_merged, 0.01);
+            ref_merged_ds = downsampleCloudVG(ref_cloud_merged, 0.01);
             pcl::io::savePCDFile(result_path + "/ref_cloud_merged.pcd", *ref_merged_ds);
 
             for (std::map<int, ReconstructedPlane>::iterator curr_it = curr_rec_planes.begin(); curr_it != curr_rec_planes.end(); curr_it++ ) {
@@ -755,7 +756,7 @@ int main(int argc, char* argv[])
                 *curr_cloud_merged += *cropped_cloud;
             }
             pcl::PointCloud<PointNormal>::Ptr curr_merged_ds(new pcl::PointCloud<PointNormal>);
-            curr_merged_ds = ChangeDetection::downsampleCloud(curr_cloud_merged, 0.01);
+            curr_merged_ds = downsampleCloudVG(curr_cloud_merged, 0.01);
             pcl::io::savePCDFile(result_path + "/curr_cloud_merged.pcd", *curr_merged_ds);
 
 

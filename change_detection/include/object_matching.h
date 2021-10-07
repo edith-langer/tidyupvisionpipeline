@@ -40,6 +40,7 @@
 #include "scene_differencing_points.h"
 #include "color_histogram.h"
 #include "detected_object.h"
+#include "mathhelpers.h"
 
 #include <PPFRecognizer.h>
 
@@ -72,7 +73,7 @@ struct HypothesesStruct {
 
 struct ObjectHypothesesStruct {
     int object_id;
-    pcl::PointCloud<PointNormal>::Ptr object_cloud;
+    pcl::PointCloud<PointNormal>::ConstPtr object_cloud;
     std::map<int, HypothesesStruct> model_hyp; //store for each model hypotheses the fitness
 };
 
@@ -97,12 +98,14 @@ public:
                    std::string model_path, std::string cfg_path);
 
     std::vector<Match> compute(std::vector<DetectedObject> &ref_result, std::vector<DetectedObject> &curr_result);
-    static FitnessScoreStruct computeModelFitness(pcl::PointCloud<PointNormal>::Ptr object, pcl::PointCloud<PointNormal>::Ptr model,
+    static FitnessScoreStruct computeModelFitness(pcl::PointCloud<PointNormal>::ConstPtr object, pcl::PointCloud<PointNormal>::ConstPtr model,
                                                         v4r::apps::PPFRecognizerParameter param);
-    static float estimateDistance(const pcl::PointCloud<PointNormal>::Ptr object_cloud, const pcl::PointCloud<PointNormal>::Ptr model_cloud, const Eigen::Matrix4f transform);
-    static std::vector<pcl::PointIndices> clusterOutliersBySize(const pcl::PointCloud<PointNormal>::Ptr cloud, std::vector<int> &removed_ind, float cluster_thr,
+    static float estimateDistance(const pcl::PointCloud<PointNormal>::ConstPtr object_cloud, const pcl::PointCloud<PointNormal>::ConstPtr model_cloud, const Eigen::Matrix4f transform);
+    static std::vector<pcl::PointIndices> clusterOutliersBySize(const pcl::PointCloud<PointNormal>::ConstPtr cloud, std::vector<int> &removed_ind, float cluster_thr,
                                                                 int min_cluster_size=15, int max_cluster_size=std::numeric_limits<int>::max());
-    static bool isObjectPlanar(pcl::PointCloud<PointNormal>::Ptr object, float plane_dist_thr, float plane_acc_thr);
+    static bool isObjectPlanar(pcl::PointCloud<PointNormal>::ConstPtr object, float plane_dist_thr, float plane_acc_thr);
+    void matchedPartGrowing(pcl::PointCloud<PointNormal>::ConstPtr obj_cloud, pcl::PointCloud<PointNormal>::Ptr matched_part,
+                                                                         pcl::PointCloud<PointNormal>::Ptr remaining_part, std::vector<int> good_pt_ids);
 
 
 private:
@@ -113,13 +116,14 @@ private:
 
     boost::shared_ptr<v4r::apps::PPFRecognizer<pcl::PointXYZRGB> > rec_;
 
-    void saveCloudResults(pcl::PointCloud<PointNormal>::Ptr object_cloud, pcl::PointCloud<PointNormal>::Ptr model_aligned, std::string path);
-    bool isBelowPlane(pcl::PointCloud<PointNormal>::Ptr model, pcl::PointCloud<PointNormal>::Ptr plane_cloud);
+    void saveCloudResults(pcl::PointCloud<PointNormal>::ConstPtr object_cloud, pcl::PointCloud<PointNormal>::ConstPtr model_aligned, std::string path);
+    bool isBelowPlane(pcl::PointCloud<PointNormal>::ConstPtr model, pcl::PointCloud<PointNormal>::ConstPtr plane_cloud);
     std::vector<Match> weightedGraphMatching(std::vector<ObjectHypothesesStruct> global_hypotheses,
                                              std::function<float(FitnessScoreStruct)> computeFitness, double fitness_thr);
     std::vector<v4r::ObjectHypothesesGroup> callRecognizer(DetectedObject obj);
     std::pair<HypothesesStruct, bool> filterRecoHypothesis(DetectedObject obj, std::vector<v4r::ObjectHypothesis::Ptr> hg);
     std::vector<ObjectHypothesesStruct> createHypotheses();
+    float computeMeanPointDistance(pcl::PointCloud<PointNormal>::ConstPtr ref_object, pcl::PointCloud<PointNormal>::ConstPtr curr_obj);
 
 };
 

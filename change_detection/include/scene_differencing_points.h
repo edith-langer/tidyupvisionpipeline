@@ -22,7 +22,7 @@ public:
 
     void setDistThreshold(double thr);
 
-    Cloud::Ptr computeDifference(Cloud::Ptr scene1, Cloud::Ptr scene2, std::vector<int> &src_indices, std::vector<int> &corr_ind);
+    Cloud::Ptr computeDifference(Cloud::ConstPtr scene1, Cloud::ConstPtr scene2, std::vector<int> &src_indices, std::vector<int> &corr_ind);
 
 private:
     double thr;

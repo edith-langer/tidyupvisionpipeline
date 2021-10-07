@@ -130,12 +130,12 @@ LVResult LocalObjectVerification::computeLV() {
 
             //remove very small clusters from the diff
             std::vector<int> small_cluster_ind;
-            ObjectMatching::clusterOutliersBySize(ref_diff_cloud, small_cluster_ind, 0.014, min_object_size);
+            ObjectMatching::clusterOutliersBySize(ref_diff_cloud, small_cluster_ind, 0.014, min_object_size_ds);
             for (int i = small_cluster_ind.size() - 1; i >= 0; i--) { //small cluster ind is sorted ascending
                 diff_ind.erase(diff_ind.begin() + small_cluster_ind[i]);
             }
 
-            if (diff_ind.size() < min_object_size || ObjectMatching::isObjectPlanar(ref_diff_cloud, 0.01, 0.9)) { //if less than 100 points left, we do not split the ref object
+            if (isObjectUnwanted(ref_diff_cloud, min_object_volume, min_object_size_ds, max_object_size_ds, 0.01, 0.9)) { //if less than 100 points left, we do not split the ref object
                 result.model_non_matching_pts = std::vector<int>{};
             }
 
@@ -168,12 +168,12 @@ LVResult LocalObjectVerification::computeLV() {
 
             //remove very small clusters from the diff
             small_cluster_ind.clear();
-            ObjectMatching::clusterOutliersBySize(curr_diff_cloud, small_cluster_ind, 0.014, min_object_size);
+            ObjectMatching::clusterOutliersBySize(curr_diff_cloud, small_cluster_ind, 0.014, min_object_size_ds);
 
             for (int i = small_cluster_ind.size() - 1; i >= 0; i--) {
                 diff_ind.erase(diff_ind.begin() + small_cluster_ind[i]);
             }
-            if (diff_ind.size() < min_object_size || ObjectMatching::isObjectPlanar(curr_diff_cloud, 0.01, 0.9)) { //if less than 100 points left, we do not split the ref object
+            if (isObjectUnwanted(curr_diff_cloud, min_object_volume, min_object_size_ds, max_object_size_ds, 0.01, 0.9)) { //if less than 100 points left, we do not split the ref object
                 result.obj_non_matching_pts = std::vector<int>{};
             }
             //split the curr object cloud
