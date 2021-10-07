@@ -12,7 +12,8 @@
 
 typedef pcl::PointXYZRGBNormal PointNormal;
 
-const float max_dist_for_being_static = 0.1; //how much can the object be displaced to still count as static
+
+const float ds_voxel_size = 0.005;
 
 enum ObjectState {NEW, REMOVED, DISPLACED, STATIC, UNKNOWN};
 
@@ -51,8 +52,16 @@ public:
     DetectedObject(pcl::PointCloud<PointNormal>::Ptr object_cloud, pcl::PointCloud<PointNormal>::Ptr plane_cloud,
                    ObjectState object_state = UNKNOWN, std::string object_folder_path = "") : unique_id_(++s_id), object_cloud_(object_cloud),
         plane_cloud_(plane_cloud), state_(object_state), object_folder_path_(object_folder_path) {
+        pcl::PointCloud<PointNormal>::Ptr obj_wo_nans(new pcl::PointCloud<PointNormal>);
         std::vector<int> nan_ind;
-        pcl::removeNaNFromPointCloud(*object_cloud_, *object_cloud_, nan_ind);
+        pcl::removeNaNFromPointCloud(*object_cloud, *obj_wo_nans, nan_ind);
+
+        object_cloud_ = obj_wo_nans;
+        object_cloud_->is_dense = true;
+
+        object_cloud_ds_.reset(new pcl::PointCloud<PointNormal>);
+        object_cloud_ds_ = downsampleCloudVG(object_cloud_, ds_voxel_size);
+        object_cloud_ds_->is_dense = true;
     }
 
     pcl::PointCloud<PointNormal>::Ptr plane_cloud_;
@@ -63,11 +72,24 @@ public:
 
     int getID() const {return unique_id_;}
     void setObjectCloud(pcl::PointCloud<PointNormal>::Ptr object_cloud) {
-        object_cloud_ = object_cloud;
+        pcl::PointCloud<PointNormal>::Ptr obj_wo_nans(new pcl::PointCloud<PointNormal>);
         std::vector<int> nan_ind;
-        pcl::removeNaNFromPointCloud(*object_cloud_, *object_cloud_, nan_ind);
+        pcl::removeNaNFromPointCloud(*object_cloud, *obj_wo_nans, nan_ind);
+
+        object_cloud_ = obj_wo_nans;
+        object_cloud_->is_dense = true;
+
+        object_cloud_ds_.reset(new pcl::PointCloud<PointNormal>);
+        object_cloud_ds_ = downsampleCloudVG(object_cloud_, ds_voxel_size);
+        object_cloud_ds_->is_dense = true;
     }
-    pcl::PointCloud<PointNormal>::Ptr getObjectCloud() const {return object_cloud_;}
+    pcl::PointCloud<PointNormal>::ConstPtr getObjectCloud() const {return object_cloud_;}
+    pcl::PointCloud<PointNormal>::ConstPtr getObjectCloudDS() const {return object_cloud_ds_;}
+
+    inline void clearClouds() {
+        object_cloud_->clear();
+        object_cloud_ds_->clear();
+    }
     
 protected:
     static int s_id;
@@ -75,6 +97,7 @@ protected:
 private:
     int unique_id_;
     pcl::PointCloud<PointNormal>::Ptr object_cloud_;
+    pcl::PointCloud<PointNormal>::Ptr object_cloud_ds_;
 };
 
 #endif // DETECTED_OBJECT_H
