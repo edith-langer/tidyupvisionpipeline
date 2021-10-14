@@ -19,6 +19,7 @@ find_package(PCL REQUIRED)
 find_package(OpenCV 3 REQUIRED)
 
 include_directories("${PROJECT_SOURCE_DIR}/include")
+include_directories("${PROJECT_SOURCE_DIR}/../change_detection/include") #for settings.h
 include_directories(${PCL_INCLUDE_DIRS})
 add_definitions(${PCL_DEFINITIONS})
 

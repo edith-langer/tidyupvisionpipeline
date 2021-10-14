@@ -25,12 +25,13 @@
 #include <pcl/filters/extract_indices.h>
 #include <pcl/filters/voxel_grid.h>
 
+#include <settings.h>
+
 typedef pcl::PointXYZRGBL PointLabel;
 
-const float max_dist_for_being_static = 0.1; //how much can the object be displaced to still count as static
 float search_radius = 0.01;
 float cluster_thr = 0.02;
-int min_cluster_size = 100;
+int min_cluster_size = 200;
 
 double ds_voxel_size = 0.002;
 
@@ -88,7 +89,7 @@ int remainingClusters (pcl::PointCloud<PointLabel>::Ptr cloud, float cluster_thr
 void writeSumResultsToFile(std::vector<Measurements> all_gt_results, std::vector<Measurements> all_tp_results, std::vector<Measurements> all_fp_results, std::string path);
 int extractDetectedObjects(std::vector<GTObject> gt_objects, pcl::PointCloud<PointLabel>::Ptr result_cloud, std::vector<std::string> & gt_obj, std::vector<std::string> & det_obj);
 void writeObjectSummaryToFile(std::map<std::string, int> & gt_obj_count, std::map<std::string, int> & det_obj_count, std::map<std::string, int> &tp_class_obj_count, std::string path);
-int computeStaticFP(std::map<std::string, pcl::PointCloud<PointLabel>::Ptr> obj_name_cloud_map, pcl::PointCloud<PointLabel>::Ptr static_leftover_cloud);
+int computeFP(std::map<std::string, pcl::PointCloud<PointLabel>::Ptr> obj_name_cloud_map, pcl::PointCloud<PointLabel>::Ptr static_leftover_cloud, std::string path, bool is_static=false);
 pcl::PointCloud<PointLabel>::Ptr downsampleCloud(pcl::PointCloud<PointLabel>::Ptr input, double leafSize);
 GTCloudsAndNumbers createGTforSceneComp(const std::map<std::string, std::map<std::string, pcl::PointCloud<PointLabel>::Ptr> > scene_annotations_map,
                                         const SceneCompInfo &scene_comp);
@@ -388,14 +389,14 @@ int main(int argc, char* argv[])
             ref_matched_removed.insert(ref_matched_removed.end(), corr_obj_str.begin(), corr_obj_str.end());
             result.nr_removed_obj += corr_obj_str.size();
 
-            FP_results.nr_removed_obj = remainingClusters(removed_obj_cloud_copy, cluster_thr, min_cluster_size, scene_comp.result_path+"/rem_removed.pcd");
+            FP_results.nr_removed_obj = computeFP(scene_annotations_map[scene_comp.ref_scene], removed_obj_cloud_copy, scene_comp.result_path+"/rem_removed");
 
             //based on detected objects
             pcl::copyPointCloud(*removed_obj_cloud, *removed_obj_cloud_copy);
             corr_obj_str = checkRemovedObjects(removed_obj_cloud_copy, reduced_gt_cloud_numbers, reduced_tp_class_object_count);
             reduced_ref_matched_removed.insert(reduced_ref_matched_removed.end(), corr_obj_str.begin(), corr_obj_str.end());
             reduced_result.nr_removed_obj += corr_obj_str.size();
-            reduced_FP_results.nr_removed_obj = remainingClusters(removed_obj_cloud_copy, cluster_thr, min_cluster_size, scene_comp.result_path+"/rem_reduced_removed.pcd");
+            reduced_FP_results.nr_removed_obj = computeFP(reduced_scene_annotations_map[scene_comp.ref_scene], removed_obj_cloud_copy, scene_comp.result_path+"/rem_reduced_removed");
         }
         /// ------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -408,7 +409,7 @@ int main(int argc, char* argv[])
             curr_matched_novel.insert(curr_matched_novel.end(), corr_obj_str.begin(), corr_obj_str.end());
             result.nr_novel_obj += corr_obj_str.size();
 
-            FP_results.nr_novel_obj = remainingClusters(novel_obj_cloud_copy, cluster_thr, min_cluster_size, scene_comp.result_path+"/rem_novel.pcd");
+            FP_results.nr_novel_obj = computeFP(scene_annotations_map[scene_comp.curr_scene], novel_obj_cloud_copy, scene_comp.result_path+"/rem_novel");
 
             //based on detected objects
             pcl::copyPointCloud(*novel_obj_cloud, *novel_obj_cloud_copy);
@@ -417,7 +418,7 @@ int main(int argc, char* argv[])
             reduced_curr_matched_novel.insert(reduced_curr_matched_novel.end(), corr_obj_str.begin(), corr_obj_str.end());
             reduced_result.nr_novel_obj += corr_obj_str.size();
 
-            reduced_FP_results.nr_novel_obj = remainingClusters(novel_obj_cloud_copy, cluster_thr, min_cluster_size, scene_comp.result_path+"/rem_reduced_novel.pcd");
+            reduced_FP_results.nr_novel_obj = computeFP(reduced_scene_annotations_map[scene_comp.curr_scene], novel_obj_cloud_copy, scene_comp.result_path+"/rem_reduced_novel");
         }
         /// ------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -442,18 +443,18 @@ int main(int argc, char* argv[])
         result.nr_static_obj += (2 * std::get<0>(matched_ojects).size());
 
 
-        FP_results.nr_moved_obj = remainingClusters(r_moved_obj_cloud_copy, cluster_thr, min_cluster_size, scene_comp.result_path+"/rem_ref_moved.pcd");
-        FP_results.nr_moved_obj += remainingClusters(c_moved_obj_cloud_copy, cluster_thr, min_cluster_size, scene_comp.result_path+"/rem_curr_moved.pcd");
+        FP_results.nr_moved_obj = computeFP(scene_annotations_map[scene_comp.ref_scene], r_moved_obj_cloud_copy, scene_comp.result_path+"/rem_ref_moved");
+        FP_results.nr_moved_obj += computeFP(scene_annotations_map[scene_comp.curr_scene], c_moved_obj_cloud_copy, scene_comp.result_path+"/rem_curr_moved");
 
         //TODO: is there something like static FP? everything in the scene is more or less static except for YCB objects
         //            FP_results.nr_static_obj = remainingClusters(r_static_obj_cloud, cluster_thr, min_cluster_size, scene_comp.result_path+"/rem_ref_static.pcd");
         //            FP_results.nr_static_obj += remainingClusters(c_static_obj_cloud, cluster_thr, min_cluster_size, scene_comp.result_path+"/rem_curr_static.pcd");
-        FP_results.nr_static_obj = computeStaticFP(scene_annotations_map[scene_comp.ref_scene], r_static_obj_cloud_copy);
-        FP_results.nr_static_obj += computeStaticFP(scene_annotations_map[scene_comp.curr_scene], c_static_obj_cloud_copy);
-        if (!r_static_obj_cloud->empty())
-            pcl::io::savePCDFileBinary(scene_comp.result_path+"/rem_ref_static.pcd", *r_static_obj_cloud);
-        if (!c_static_obj_cloud->empty())
-            pcl::io::savePCDFileBinary( scene_comp.result_path+"/rem_curr_static.pcd", *c_static_obj_cloud);
+        FP_results.nr_static_obj = computeFP(scene_annotations_map[scene_comp.ref_scene], r_static_obj_cloud_copy, scene_comp.result_path+"/rem_ref_static", true);
+        FP_results.nr_static_obj += computeFP(scene_annotations_map[scene_comp.curr_scene], c_static_obj_cloud_copy, scene_comp.result_path+"/rem_curr_static", true);
+        //        if (!r_static_obj_cloud->empty())
+        //            pcl::io::savePCDFileBinary(scene_comp.result_path+"/rem_ref_static.pcd", *r_static_obj_cloud);
+        //        if (!c_static_obj_cloud->empty())
+        //            pcl::io::savePCDFileBinary( scene_comp.result_path+"/rem_curr_static.pcd", *c_static_obj_cloud);
 
         //based on detected objects
         pcl::copyPointCloud(*c_moved_obj_cloud, *c_moved_obj_cloud_copy);
@@ -470,18 +471,18 @@ int main(int argc, char* argv[])
         reduced_result.nr_static_obj += (2 * std::get<0>(matched_ojects).size());
 
 
-        reduced_FP_results.nr_moved_obj = remainingClusters(r_moved_obj_cloud_copy, cluster_thr, min_cluster_size, scene_comp.result_path+"/rem_reduced_ref_moved.pcd");
-        reduced_FP_results.nr_moved_obj += remainingClusters(c_moved_obj_cloud_copy, cluster_thr, min_cluster_size, scene_comp.result_path+"/rem_reduced_curr_moved.pcd");
+        reduced_FP_results.nr_moved_obj = computeFP(reduced_scene_annotations_map[scene_comp.ref_scene], r_moved_obj_cloud_copy, scene_comp.result_path+"/rem_reduced_ref_moved");
+        reduced_FP_results.nr_moved_obj += computeFP(reduced_scene_annotations_map[scene_comp.curr_scene], c_moved_obj_cloud_copy, scene_comp.result_path+"/rem_reduced_curr_moved");
 
         //TODO: is there something like static FP? everything in the scene is more or less static except for YCB objects
         //            FP_results.nr_static_obj = remainingClusters(r_static_obj_cloud, cluster_thr, min_cluster_size, scene_comp.result_path+"/rem_ref_static.pcd");
         //            FP_results.nr_static_obj += remainingClusters(c_static_obj_cloud, cluster_thr, min_cluster_size, scene_comp.result_path+"/rem_curr_static.pcd");
-        reduced_FP_results.nr_static_obj = computeStaticFP(reduced_scene_annotations_map[scene_comp.ref_scene], r_static_obj_cloud_copy);
-        reduced_FP_results.nr_static_obj += computeStaticFP(reduced_scene_annotations_map[scene_comp.curr_scene], c_static_obj_cloud_copy);
-        if (!r_static_obj_cloud->empty())
-            pcl::io::savePCDFileBinary(scene_comp.result_path+"/rem_reduced_ref_static.pcd", *r_static_obj_cloud);
-        if (!c_static_obj_cloud->empty())
-            pcl::io::savePCDFileBinary( scene_comp.result_path+"/rem_reduced_curr_static.pcd", *c_static_obj_cloud);
+        reduced_FP_results.nr_static_obj = computeFP(reduced_scene_annotations_map[scene_comp.ref_scene], r_static_obj_cloud_copy, scene_comp.result_path+"/rem_reduced_ref_static", true);
+        reduced_FP_results.nr_static_obj += computeFP(reduced_scene_annotations_map[scene_comp.curr_scene], c_static_obj_cloud_copy, scene_comp.result_path+"/rem_reduced_curr_static", true);
+        //        if (!r_static_obj_cloud->empty())
+        //            pcl::io::savePCDFileBinary(scene_comp.result_path+"/rem_reduced_ref_static.pcd", *r_static_obj_cloud);
+        //        if (!c_static_obj_cloud->empty())
+        //            pcl::io::savePCDFileBinary( scene_comp.result_path+"/rem_reduced_curr_static.pcd", *c_static_obj_cloud);
 
         /// ------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -613,7 +614,7 @@ int remainingClusters (pcl::PointCloud<PointLabel>::Ptr cloud, float cluster_thr
     return cluster_indices.size();
 }
 
-int computeStaticFP(std::map<std::string, pcl::PointCloud<PointLabel>::Ptr> obj_name_cloud_map, pcl::PointCloud<PointLabel>::Ptr static_leftover_cloud) {
+int computeFP(std::map<std::string, pcl::PointCloud<PointLabel>::Ptr> obj_name_cloud_map, pcl::PointCloud<PointLabel>::Ptr static_leftover_cloud, std::string path, bool is_static) {
     int fp = 0;
     std::vector<int> nan_ind;
     pcl::PointCloud<PointLabel>::Ptr no_nans_cloud(new pcl::PointCloud<PointLabel>);
@@ -622,6 +623,7 @@ int computeStaticFP(std::map<std::string, pcl::PointCloud<PointLabel>::Ptr> obj_
     if (no_nans_cloud->size() == 0) {
         return 0;
     }
+    std::vector<int> all_gt_overlapping_ind;
     for (auto gt_obj : obj_name_cloud_map) {
         int nr_det_obj = 0;
         pcl::search::KdTree<PointLabel>::Ptr tree (new pcl::search::KdTree<PointLabel>);
@@ -631,12 +633,44 @@ int computeStaticFP(std::map<std::string, pcl::PointCloud<PointLabel>::Ptr> obj_
 
         for (const PointLabel p : gt_obj.second->points) {
             if (tree->radiusSearch(p, 0.005, nn_indices, nn_distances) > 0) {
-                fp++;
-                std::cout << "FP static: " << gt_obj.first << std::endl;
-                break;
+                overlapping_ind.insert(overlapping_ind.end(), nn_indices.begin(), nn_indices.end());
             }
         }
+        std::sort(overlapping_ind.begin(), overlapping_ind.end());
+        overlapping_ind.erase(std::unique( overlapping_ind.begin(), overlapping_ind.end() ), overlapping_ind.end() );
+        //if more than 1/5 of the GT object is classified as static
+        if (overlapping_ind.size() > gt_obj.second->size()/5) {
+            fp++;
+            std::cout << "FP: " << gt_obj.first << std::endl;
+            all_gt_overlapping_ind.insert(all_gt_overlapping_ind.begin(), overlapping_ind.begin(), overlapping_ind.end());
+        }
     }
+
+    std::sort(all_gt_overlapping_ind.begin(), all_gt_overlapping_ind.end());
+    all_gt_overlapping_ind.erase(std::unique( all_gt_overlapping_ind.begin(), all_gt_overlapping_ind.end() ), all_gt_overlapping_ind.end() );
+
+    //remove overlapping ind from the cloud
+    pcl::PointCloud<PointLabel>::Ptr FP_GT_obj_cloud(new pcl::PointCloud<PointLabel>);
+    pcl::PointIndices::Ptr c_ind(new pcl::PointIndices());
+    c_ind->indices = all_gt_overlapping_ind;
+    pcl::ExtractIndices<PointLabel> extract;
+    extract.setInputCloud (no_nans_cloud);
+    extract.setIndices(c_ind);
+    extract.setKeepOrganized(false);
+    extract.setNegative (false);
+    extract.filter(*FP_GT_obj_cloud);
+
+    if (!FP_GT_obj_cloud->empty())
+        pcl::io::savePCDFileBinary(path + "_gt_obj.pcd", *FP_GT_obj_cloud);
+
+    //there is nothing like FP for static objects when it is not a object from the GT
+    if (!is_static) {
+        extract.setNegative (true);
+        extract.filter(*no_nans_cloud);
+
+        fp += remainingClusters(no_nans_cloud, cluster_thr, min_cluster_size, path + "_other_obj.pcd");
+    }
+
     return fp;
 }
 
