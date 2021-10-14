@@ -156,11 +156,6 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
             const pcl::PointCloud<PointNormal>::ConstPtr model_cloud = ro_iter->getObjectCloud();
             const pcl::PointCloud<PointNormal>::ConstPtr object_cloud = co_iter->getObjectCloud();
 
-            //compute distance between object and model
-            //float dist = estimateDistance(object_cloud, model_cloud, match.transform);
-            float dist = computeMeanPointDistance(object_cloud, model_cloud);
-            bool is_static = dist < max_dist_for_being_static;
-
             pcl::PointCloud<PointNormal>::Ptr model_aligned(new pcl::PointCloud<PointNormal>());
             pcl::transformPointCloudWithNormals(*model_cloud, *model_aligned, match.transform);
 
@@ -182,18 +177,12 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
 
             //if the leftover is just a plane, too small or has little volume, remove it
             pcl::PointCloud<PointNormal>::Ptr ds_cloud = downsampleCloudVG(model_diff_cloud, ds_leaf_size_LV);
-            if (isObjectUnwanted(ds_cloud, min_object_volume, min_object_size_ds, max_object_size_ds, 0.01, 0.9))
+            if (isObjectUnwanted(ds_cloud, min_object_volume, min_object_size_ds, std::numeric_limits<int>::max(), 0.01, 0.9))
                 model_diff_cloud->clear();
 
             //nothing is left of the diff --> the whole model cluster is a match
             if (model_diff_cloud->size() == 0 ) { //we do not split the model object
-                if (is_static) {
-                    ro_iter->state_ = ObjectState::STATIC;
-                    ro_iter->match_ = match;
-                } else {
-                    ro_iter->state_ = ObjectState::DISPLACED;
-                    ro_iter->match_ = match;
-                }
+                ro_iter->match_ = match;
                 model_diff_cloud->clear();
             }
             //split the model cloud
@@ -212,7 +201,6 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
 
                 //the matched part of the model
                 ro_iter->setObjectCloud(matched_model_part);
-                ro_iter->state_ =(is_static ? ObjectState::STATIC : ObjectState::DISPLACED);
                 ro_iter->match_ = match;
                 ro_iter->object_folder_path_="";
 
@@ -234,17 +222,11 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
 
             //if the leftover is just a plane, too small or has little volume, remove it
             ds_cloud = downsampleCloudVG(object_diff_cloud, ds_leaf_size_LV);
-            if (isObjectUnwanted(ds_cloud, min_object_volume, min_object_size_ds, max_object_size_ds, 0.01, 0.9))
+            if (isObjectUnwanted(ds_cloud, min_object_volume, min_object_size_ds, std::numeric_limits<int>::max(), 0.01, 0.9))
                 object_diff_cloud->clear();
 
             if (object_diff_cloud->size() == 0) { //if less than 100 points left, we do not split the object
-                if (is_static) {
-                    co_iter->state_ = ObjectState::STATIC;
-                    co_iter->match_ = match;
-                } else {
-                    co_iter->state_ = ObjectState::DISPLACED;
-                    co_iter->match_ = match;
-                }
+                co_iter->match_ = match;
                 object_diff_cloud->clear();
             }
             //split the object cloud
@@ -257,9 +239,9 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
 //                //re-compute fitness for the splitted part
 //                match.fitness_score = computeModelFitness(matched_object_part, model_aligned, ppf_params);
 
+
                 //the matched part of the object
                 co_iter->setObjectCloud(matched_object_part);
-                co_iter->state_ = (is_static ? ObjectState::STATIC : ObjectState::DISPLACED);
                 co_iter->match_ = match;
                 co_iter->object_folder_path_="";
 
@@ -284,19 +266,64 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
             ro_iter->match_.fitness_score = f;
             co_iter->match_.fitness_score = f;
 
+            //model and/or object got split, compute distance with the matched parts
+            //float dist = estimateDistance(object_cloud, model_cloud, match.transform);
+            float dist = computeMeanPointDistance(co_iter->getObjectCloud(), ro_iter->getObjectCloud());
+            bool is_static = dist < max_dist_for_being_static;
+            ro_iter->state_ =(is_static ? ObjectState::STATIC : ObjectState::DISPLACED);
+            co_iter->state_ = (is_static ? ObjectState::STATIC : ObjectState::DISPLACED);
+
 
             //ATTENTION: The ro_iter is invalid now because of the push_back. Vector re-allocates and invalidates pointers
             if (model_diff_cloud->size() > 0) {
                 //the remaining part of the model
-                DetectedObject diff_model_part(model_diff_cloud, ro_iter->plane_cloud_, ObjectState::REMOVED, "");
-                model_vec_.push_back(diff_model_part);
+                std::vector<int> small_cluster_ind;
+                std::vector<pcl::PointIndices> diff_cloud_cluster_ind = ObjectMatching::clusterOutliersBySize(model_diff_cloud, small_cluster_ind, 0.014, min_object_size_ds);
+                for (size_t c = 0; c < diff_cloud_cluster_ind.size(); c++) {
+                    pcl::PointCloud<PointNormal>::Ptr remaining_cluster_cloud(new pcl::PointCloud<PointNormal>);
+                    pcl::ExtractIndices<PointNormal> extract;
+                    extract.setInputCloud (model_diff_cloud);
+                    pcl::PointIndices::Ptr cluster_ind(new pcl::PointIndices);
+                    cluster_ind->indices = diff_cloud_cluster_ind[c].indices;
+                    extract.setIndices (cluster_ind);
+                    extract.setNegative (false);
+                    extract.setKeepOrganized(false);
+                    extract.filter(*remaining_cluster_cloud);
+
+                    pcl::PointCloud<PointNormal>::Ptr ds_cloud = downsampleCloudVG(remaining_cluster_cloud, ds_leaf_size_LV);
+                    if (!isObjectUnwanted(ds_cloud, min_object_volume, min_object_size_ds, std::numeric_limits<int>::max(), 0.01, 0.9)) {
+                        DetectedObject diff_model_part(remaining_cluster_cloud, ro_iter->plane_cloud_, ObjectState::REMOVED, "");
+                        model_vec_.push_back(diff_model_part);
+                    }
+                }
+//                DetectedObject diff_model_part(model_diff_cloud, ro_iter->plane_cloud_, ObjectState::REMOVED, "");
+//                model_vec_.push_back(diff_model_part);
             }
 
             //ATTENTION: The co_iter is invalid now because of the push_back. Vector re-allocates and invalidates pointers
             if (object_diff_cloud->size() > 0) {
                 //the remaining part of the object
-                DetectedObject diff_object_part(object_diff_cloud, co_iter->plane_cloud_, ObjectState::NEW, "");
-                object_vec_.push_back(diff_object_part);
+                std::vector<int> small_cluster_ind;
+                std::vector<pcl::PointIndices> diff_cloud_cluster_ind = ObjectMatching::clusterOutliersBySize(object_diff_cloud, small_cluster_ind, 0.014, min_object_size_ds);
+                for (size_t c = 0; c < diff_cloud_cluster_ind.size(); c++) {
+                    pcl::PointCloud<PointNormal>::Ptr remaining_cluster_cloud(new pcl::PointCloud<PointNormal>);
+                    pcl::ExtractIndices<PointNormal> extract;
+                    extract.setInputCloud (object_diff_cloud);
+                    pcl::PointIndices::Ptr cluster_ind(new pcl::PointIndices);
+                    cluster_ind->indices = diff_cloud_cluster_ind[c].indices;
+                    extract.setIndices (cluster_ind);
+                    extract.setNegative (false);
+                    extract.setKeepOrganized(false);
+                    extract.filter(*remaining_cluster_cloud);
+
+                    pcl::PointCloud<PointNormal>::Ptr ds_cloud = downsampleCloudVG(remaining_cluster_cloud, ds_leaf_size_LV);
+                    if (!isObjectUnwanted(ds_cloud, min_object_volume, min_object_size_ds, std::numeric_limits<int>::max(), 0.01, 0.9)) {
+                        DetectedObject diff_object_part(remaining_cluster_cloud, co_iter->plane_cloud_, ObjectState::NEW, "");
+                        object_vec_.push_back(diff_object_part);
+                    }
+                }
+//                DetectedObject diff_object_part(object_diff_cloud, co_iter->plane_cloud_, ObjectState::NEW, "");
+//                object_vec_.push_back(diff_object_part);
             }
         }
 
@@ -389,7 +416,7 @@ std::vector<Match> ObjectMatching::weightedGraphMatching(std::vector<ObjectHypot
             std::string o_name = g[mate[*vi]].name;
             m_name.erase(m_name.length()-6, 6); //erase _model
             o_name.erase(o_name.length()-7, 7); //erase _object
-            Match m(std::stoi(m_name), std::stoi(o_name), deampl_weight, edge_hypo.transform, edge_hypo.fitness); //de-amplify
+            Match m(std::stoi(m_name), std::stoi(o_name), edge_hypo.transform, edge_hypo.fitness); //de-amplify
             model_obj_match.push_back(m);
         }
     }
@@ -871,7 +898,7 @@ void ObjectMatching::matchedPartGrowing(pcl::PointCloud<PointNormal>::ConstPtr o
     extract.filter(*remaining_part);
 
     pcl::PointCloud<PointNormal>::Ptr ds_cloud = downsampleCloudVG(remaining_part, ds_leaf_size_LV);
-    if (!remaining_part->empty() && isObjectUnwanted(ds_cloud, min_object_volume, min_object_size_ds, max_object_size_ds, 0.01, 0.9)) {
+    if (!remaining_part->empty() && isObjectUnwanted(ds_cloud, min_object_volume, min_object_size_ds, std::numeric_limits<int>::max(), 0.01, 0.9)) {
         pcl::copyPointCloud(*obj_cloud, *matched_part);
         remaining_part->clear();
     }

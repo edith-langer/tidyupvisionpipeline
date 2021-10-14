@@ -428,7 +428,7 @@ int main(int argc, char* argv[])
     std::sort(all_scene_paths.begin(), all_scene_paths.end());
 
     std::string timestamp = getCurrentTime();
-    base_result_path =  base_result_path + "/" + timestamp + (do_LV_before_matching ? "_withLV":"" ) + "_filterPlanarObj_ds05/";
+    base_result_path =  base_result_path + "/" + timestamp + (do_LV_before_matching ? "_withLV":"" ) + "_filterUnwantedObjects_clusterMatchingDiff_fullPipeline/";
     //----------------------------setup result folder----------------------------------
     //start at 1 because element 0 is scene1 without objects
     for (size_t idx = 1; idx < all_scene_paths.size(); idx++)

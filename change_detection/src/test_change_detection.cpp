@@ -19,6 +19,7 @@
 #include <pcl/io/ply_io.h>
 
 #include "change_detection.h"
+#include "mathhelpers.h"
 
 bool do_LV_before_matching = true;
 
@@ -700,7 +701,7 @@ int main(int argc, char* argv[])
         *ref_cloud_merged += *cropped_cloud;
     }
     pcl::PointCloud<PointNormal>::Ptr ref_merged_ds(new pcl::PointCloud<PointNormal>);
-    ref_merged_ds = ChangeDetection::downsampleCloud(ref_cloud_merged, 0.01);
+    ref_merged_ds = downsampleCloudVG(ref_cloud_merged, 0.01);
     pcl::io::savePCDFile(result_path + "/ref_cloud_merged.pcd", *ref_merged_ds);
 
     for (std::map<int, ReconstructedPlane>::iterator curr_it = curr_rec_planes.begin(); curr_it != curr_rec_planes.end(); curr_it++ ) {
@@ -725,7 +726,7 @@ int main(int argc, char* argv[])
         *curr_cloud_merged += *cropped_cloud;
     }
     pcl::PointCloud<PointNormal>::Ptr curr_merged_ds(new pcl::PointCloud<PointNormal>);
-    curr_merged_ds = ChangeDetection::downsampleCloud(curr_cloud_merged, 0.01);
+    curr_merged_ds = downsampleCloudVG(curr_cloud_merged, 0.01);
     pcl::io::savePCDFile(result_path + "/curr_cloud_merged.pcd", *curr_merged_ds);
 
 

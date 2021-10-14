@@ -33,12 +33,11 @@ struct Match {
     Eigen::Matrix<float,4,4,Eigen::DontAlign> transform;
     int model_id;
     int object_id;
-    float confidence;
     FitnessScoreStruct fitness_score;
 
-    Match() {model_id = -1; object_id = -1, confidence = -1; transform = Eigen::Matrix4f::Identity();}
-    Match(int m_id, int o_id, float conf, Eigen::Matrix4f t, FitnessScoreStruct f=FitnessScoreStruct()) {
-        model_id = m_id; object_id = o_id; confidence = conf; transform = Eigen::Matrix4f(t); fitness_score = f;
+    Match() {model_id = -1; object_id = -1, transform = Eigen::Matrix4f::Identity();}
+    Match(int m_id, int o_id, Eigen::Matrix4f t, FitnessScoreStruct f=FitnessScoreStruct()) {
+        model_id = m_id; object_id = o_id; transform = Eigen::Matrix4f(t); fitness_score = f;
     }
 };
 

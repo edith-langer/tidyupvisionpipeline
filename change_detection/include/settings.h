@@ -1,6 +1,8 @@
 #ifndef SETTINGS_H
 #define SETTINGS_H
 
+#include <PPFRecognizerParameter.h>
+
 static const double ds_leaf_size_LV = 0.01;
 static const double ds_leaf_size_ppf = 0.005;
 

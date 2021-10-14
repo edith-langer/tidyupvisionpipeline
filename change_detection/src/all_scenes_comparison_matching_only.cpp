@@ -232,7 +232,7 @@ int main(int argc, char* argv[])
 
 
     std::string timestamp = getCurrentTime();
-    base_result_path =  base_result_path + "/" + timestamp + (do_LV_before_matching ? "_withLV":"" ) + "_filterPlanarObj_ds05/";
+    base_result_path =  base_result_path + "/" + timestamp + (do_LV_before_matching ? "_withLV":"" ) + "_filterUnwantedObjects_clusterMatchingDiff/";
     //----------------------------setup result folder----------------------------------
 
     for (size_t i = 0; i < all_scene_paths.size(); i++) {
@@ -256,6 +256,9 @@ int main(int argc, char* argv[])
         curr_static_obj.clear();
         new_obj.clear();
         removed_obj.clear();
+
+        pcl::PointCloud<PointNormal>::Ptr curr_merged_cloud (new pcl::PointCloud<PointNormal>);
+        pcl::PointCloud<PointNormal>::Ptr ref_merged_cloud (new pcl::PointCloud<PointNormal>);
 
 
         //iterate through all plane comparisons
@@ -296,11 +299,13 @@ int main(int argc, char* argv[])
                                 pcl::io::savePCDFile(obj_folder + "/3D_model.pcd", *(model_obj.getObjectCloud()));
                                 model_obj.object_folder_path_ = obj_folder;
                                 ref_objects_vec.push_back(model_obj);
+
+                                *ref_merged_cloud += *obj_cloud;
                             }
                         }
                     }
 
-                    ChangeDetection::filterUnwantedObjects(ref_objects_vec, min_object_volume, min_object_size_ds, max_object_size_ds, 0.01, 0.9, filtered_obj_by_size_path);
+                    ChangeDetection::filterUnwantedObjects(ref_objects_vec, min_object_volume, min_object_size_ds, std::numeric_limits<int>::max(), 0.01, 0.9, filtered_obj_by_size_path);
 
 
                     if (boost::filesystem::exists(curr_objs_path)) {
@@ -318,11 +323,13 @@ int main(int argc, char* argv[])
 
                                 DetectedObject obj(obj_cloud, plane_cloud);
                                 curr_objects_vec.push_back(obj);
+
+                                *curr_merged_cloud += *obj_cloud;
                             }
                         }
                     }
 
-                    ChangeDetection::filterUnwantedObjects(curr_objects_vec, min_object_volume, min_object_size_ds, max_object_size_ds, 0.01, 0.9,filtered_obj_by_size_path);
+                    ChangeDetection::filterUnwantedObjects(curr_objects_vec, min_object_volume, min_object_size_ds, std::numeric_limits<int>::max(), 0.01, 0.9,filtered_obj_by_size_path);
 
                     if (curr_objects_vec.size() == 0) { //all objects removed from ref scene
                         for (size_t i = 0; i < ref_objects_vec.size(); i++) {
@@ -349,8 +356,8 @@ int main(int argc, char* argv[])
                     //region growing of static/displaced objects (should create more precise results if e.g. the model was smaller than die object or not precisely aligned
                     ChangeDetection::mergeObjectParts(ref_result, merge_object_parts_folder);
                     ChangeDetection::mergeObjectParts(curr_result, merge_object_parts_folder);
-                    ChangeDetection::filterUnwantedObjects(ref_result, min_object_volume, min_object_size_ds, max_object_size_ds, 0.01, 0.9, filtered_obj_by_size_path);
-                    ChangeDetection::filterUnwantedObjects(curr_result, min_object_volume, min_object_size_ds, max_object_size_ds, 0.01, 0.9, filtered_obj_by_size_path);
+                    ChangeDetection::filterUnwantedObjects(ref_result, min_object_volume, min_object_size_ds, std::numeric_limits<int>::max(), 0.01, 0.9, filtered_obj_by_size_path);
+                    ChangeDetection::filterUnwantedObjects(curr_result, min_object_volume, min_object_size_ds, std::numeric_limits<int>::max(), 0.01, 0.9, filtered_obj_by_size_path);
 
                     //all detected objects labeled as removed (ref_objects) or new (curr_objects) could be placed on another plane
                     updateDetectedObjects(ref_result, curr_result);
@@ -379,9 +386,11 @@ int main(int argc, char* argv[])
                                     return false;
                                 DetectedObject obj (obj_cloud, plane_cloud);
                                 curr_objects_vec.push_back(obj);
+
+                                *curr_merged_cloud += *obj_cloud;
                             }
                         }
-                        ChangeDetection::filterUnwantedObjects(curr_objects_vec, min_object_volume, min_object_size_ds, max_object_size_ds, 0.01, 0.9, filtered_obj_by_size_path);
+                        ChangeDetection::filterUnwantedObjects(curr_objects_vec, min_object_volume, min_object_size_ds, std::numeric_limits<int>::max(), 0.01, 0.9, filtered_obj_by_size_path);
 
                         std::vector<DetectedObject> ref_result, curr_result;
                         curr_result = curr_objects_vec;
@@ -412,9 +421,11 @@ int main(int argc, char* argv[])
                                     return false;
                                 DetectedObject obj (obj_cloud, plane_cloud);
                                 ref_objects_vec.push_back(obj);
+
+                                *ref_merged_cloud += *obj_cloud;
                             }
                         }
-                        ChangeDetection::filterUnwantedObjects(ref_objects_vec, min_object_volume, min_object_size_ds, max_object_size_ds, 0.01, 0.9, filtered_obj_by_size_path);
+                        ChangeDetection::filterUnwantedObjects(ref_objects_vec, min_object_volume, min_object_size_ds, std::numeric_limits<int>::max(), 0.01, 0.9, filtered_obj_by_size_path);
 
                         std::vector<DetectedObject> ref_result, curr_result;
                         ref_result = ref_objects_vec;
@@ -440,8 +451,8 @@ int main(int argc, char* argv[])
             ChangeDetection::mergeObjectParts(ref_result, merge_object_parts_folder);
             ChangeDetection::mergeObjectParts(curr_result, merge_object_parts_folder);
 
-            ChangeDetection::filterUnwantedObjects(ref_result, min_object_volume, min_object_size_ds, max_object_size_ds, 0.01, 0.9, filtered_obj_by_size_path);
-            ChangeDetection::filterUnwantedObjects(curr_result, min_object_volume, min_object_size_ds, max_object_size_ds, 0.01, 0.9, filtered_obj_by_size_path);
+            ChangeDetection::filterUnwantedObjects(ref_result, min_object_volume, min_object_size_ds, std::numeric_limits<int>::max(), 0.01, 0.9, filtered_obj_by_size_path);
+            ChangeDetection::filterUnwantedObjects(curr_result, min_object_volume, min_object_size_ds, std::numeric_limits<int>::max(), 0.01, 0.9, filtered_obj_by_size_path);
 
             updateDetectedObjects(ref_result, curr_result);
         }
@@ -461,6 +472,11 @@ int main(int argc, char* argv[])
 
 
         //STORING RESULTS AND VISUALIZE THEM
+        if (!ref_merged_cloud->empty())
+            pcl::io::savePCDFile(result_path + "/ref_merged_objects.pcd", *ref_merged_cloud);
+        if (!curr_merged_cloud->empty())
+            pcl::io::savePCDFile(result_path + "/curr_merged_objects.pcd", *curr_merged_cloud);
+
 
         //create point clouds of detected objects to save results as pcd-files
         pcl::PointCloud<PointNormal>::Ptr ref_removed_objects_cloud(new pcl::PointCloud<PointNormal>);

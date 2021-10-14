@@ -104,7 +104,7 @@ LVResult LocalObjectVerification::computeLV() {
     icp.setRANSACOutlierRejectionThreshold(params_.icp_ransac_thr);
     icp.setMaximumIterations(params_.icp_max_iter);
     icp.setTransformationEpsilon (1e-9);
-    icp.setTransformationRotationEpsilon(1 - 1e-15); //epsilon is the cos(angle)
+    //icp.setTransformationRotationEpsilon(1 - 1e-15); //epsilon is the cos(angle)
     icp.align(*curr_object_registered);
 
     std::cout << "has converged:" << icp.hasConverged() << " score: " << icp.getFitnessScore() << std::endl;
@@ -135,7 +135,7 @@ LVResult LocalObjectVerification::computeLV() {
                 diff_ind.erase(diff_ind.begin() + small_cluster_ind[i]);
             }
 
-            if (isObjectUnwanted(ref_diff_cloud, min_object_volume, min_object_size_ds, max_object_size_ds, 0.01, 0.9)) { //if less than 100 points left, we do not split the ref object
+            if (isObjectUnwanted(ref_diff_cloud, min_object_volume, min_object_size_ds, std::numeric_limits<int>::max(), 0.01, 0.9)) { //if less than 100 points left, we do not split the ref object
                 result.model_non_matching_pts = std::vector<int>{};
             }
 
@@ -173,7 +173,7 @@ LVResult LocalObjectVerification::computeLV() {
             for (int i = small_cluster_ind.size() - 1; i >= 0; i--) {
                 diff_ind.erase(diff_ind.begin() + small_cluster_ind[i]);
             }
-            if (isObjectUnwanted(curr_diff_cloud, min_object_volume, min_object_size_ds, max_object_size_ds, 0.01, 0.9)) { //if less than 100 points left, we do not split the ref object
+            if (isObjectUnwanted(curr_diff_cloud, min_object_volume, min_object_size_ds, std::numeric_limits<int>::max(), 0.01, 0.9)) { //if less than 100 points left, we do not split the ref object
                 result.obj_non_matching_pts = std::vector<int>{};
             }
             //split the curr object cloud

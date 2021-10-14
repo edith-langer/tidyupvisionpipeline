@@ -326,7 +326,7 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
                         DetectedObject &matched_ref = ref_obj_static.back();
                         DetectedObject &matched_curr = curr_obj_static.back();
 
-                        Match m(matched_ref.getID(), matched_curr.getID(), 1.0, lv_result.transform_obj_to_model, lv_result.fitness_score);
+                        Match m(matched_ref.getID(), matched_curr.getID(), lv_result.transform_obj_to_model, lv_result.fitness_score);
                         matched_ref.match_ = m;
                         matched_curr.match_ = m;
 
@@ -1348,7 +1348,7 @@ void ChangeDetection::matchAndRemoveObjects (pcl::PointCloud<PointNormal>::Ptr r
         icp.setRANSACOutlierRejectionThreshold(icp_ransac_thr);
         icp.setMaximumIterations(icp_max_iter);
         icp.setTransformationEpsilon (1e-9);
-        icp.setTransformationRotationEpsilon(1 - 1e-15); //epsilon is the cos(angle)
+        //icp.setTransformationRotationEpsilon(1 - 1e-15); //epsilon is the cos(angle)
         icp.align(*object_registered);
 
 

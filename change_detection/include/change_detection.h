@@ -57,6 +57,10 @@ public:
         output_path_ = output_path;
     }
 
+    void setPPFModelPath (std::string model_path) {
+        ppf_model_path_ = model_path;
+    }
+
     void setRefCloud(pcl::PointCloud<PointNormal>::Ptr cloud) {
         this->ref_cloud_ = cloud;
     }
@@ -66,6 +70,16 @@ public:
     }
 
     void compute(std::vector<DetectedObject> &ref_result, std::vector<DetectedObject> &curr_result);
+    std::vector<PlaneWithObjInd> getObjectsFromPlane(pcl::PointCloud<PointNormal>::Ptr input_cloud, Eigen::Vector4f plane_coeffs,
+                                                     pcl::PointCloud<pcl::PointXYZ>::Ptr convex_hull_pts,
+                                                     pcl::PointCloud<PointNormal>::Ptr prev_checked_plane_cloud, std::string res_path);
+    void objectRegionGrowing(pcl::PointCloud<PointNormal>::Ptr cloud, std::vector<PlaneWithObjInd> &objects, int max_object_size = 5000); // std::numeric_limits<int>::max());
+    void mergeObjects(std::vector<PlaneWithObjInd>& objects);
+    pcl::PointCloud<PointNormal>::Ptr fromObjectVecToObjectCloud(const std::vector<PlaneWithObjInd> objects, pcl::PointCloud<PointNormal>::Ptr cloud, bool keepOrganized=true);
+    void upsampleObjectsAndPlanes(pcl::PointCloud<PointNormal>::Ptr orig_cloud, pcl::PointCloud<PointNormal>::Ptr ds_cloud,
+                                  std::vector<PlaneWithObjInd> &objects, double leaf_size, std::string res_path);
+
+
     static void mergeObjectParts(std::vector<DetectedObject> &detected_objects, std::string merge_object_parts_folder);
     static void filterSmallVolumes(std::vector<DetectedObject> &objects, double volume_thr, int min_obj_size=0);
     static void filterUnwantedObjects(std::vector<DetectedObject> &objects, double volume_thr=0, int min_obj_size=0, int max_obj_size=std::numeric_limits<int>::max(),
@@ -81,7 +95,6 @@ private:
     std::vector<PlaneWithObjInd> potential_objects_;
     pcl::PointCloud<PointNormal>::Ptr ref_cloud_;
     pcl::PointCloud<PointNormal>::Ptr curr_cloud_;
-
     Eigen::Vector4f ref_plane_coeffs_;
     Eigen::Vector4f curr_plane_coeffs_;
     pcl::PointCloud<pcl::PointXYZ>::Ptr curr_convex_hull_pts_;
@@ -93,14 +106,9 @@ private:
     pcl::PointCloud<PointNormal>::Ptr ref_checked_plane_point_cloud_;
 
     static void refineNormals(pcl::PointCloud<PointNormal>::Ptr object_cloud);
-    void upsampleObjectsAndPlanes(pcl::PointCloud<PointNormal>::Ptr orig_cloud, pcl::PointCloud<PointNormal>::Ptr ds_cloud,
-                                  std::vector<PlaneWithObjInd> &objects, double leaf_size, std::string res_path);
     std::tuple<pcl::PointCloud<PointNormal>::Ptr, std::vector<int> > upsampleObjects(pcl::octree::OctreePointCloudSearch<PointNormal>::Ptr octree, pcl::PointCloud<PointNormal>::ConstPtr orig_input_cloud,
                                                                                      pcl::PointCloud<PointNormal>::ConstPtr objects_ds_cloud, std::string output_path, int counter);
-    void objectRegionGrowing(pcl::PointCloud<PointNormal>::Ptr cloud, std::vector<PlaneWithObjInd> &objects, int max_object_size = 5000); // std::numeric_limits<int>::max());
-    pcl::PointCloud<PointNormal>::Ptr fromObjectVecToObjectCloud(const std::vector<PlaneWithObjInd> objects, pcl::PointCloud<PointNormal>::Ptr cloud, bool keepOrganized=true);
     void saveObjectsWithPlanes(std::string path, const std::vector<PlaneWithObjInd> objects, pcl::PointCloud<PointNormal>::Ptr cloud);
-    void mergeObjects(std::vector<PlaneWithObjInd>& objects);
     std::vector<double> filterBasedOnColor(std::vector<PlaneWithObjInd>& objects, pcl::PointCloud<PointNormal>::Ptr cloud, int _nr_binsh=10);
     std::vector<int> removePlanarObjects (std::vector<PlaneWithObjInd>& objects, pcl::PointCloud<PointNormal>::Ptr cloud, float _plane_dist_thr=0.01);
     int checkPlanarity (PlaneWithObjInd& objects, pcl::PointCloud<PointNormal>::Ptr cloud, float _plane_dist_thr);
@@ -111,9 +119,6 @@ private:
     DetectedObject fromPlaneIndObjToDetectedObject (pcl::PointCloud<PointNormal>::Ptr curr_cloud, PlaneWithObjInd obj);
     int checkVerticalPlanarity(PlaneWithObjInd& object, pcl::PointCloud<PointNormal>::Ptr cloud, float _plane_dist_thr);
     void filterVerticalPlanes(std::vector<PlaneWithObjInd>& objects, pcl::PointCloud<PointNormal>::Ptr cloud, std::string path, float _plane_dist_thr=0.005);
-    std::vector<PlaneWithObjInd> getObjectsFromPlane(pcl::PointCloud<PointNormal>::Ptr input_cloud, Eigen::Vector4f plane_coeffs,
-                                                     pcl::PointCloud<pcl::PointXYZ>::Ptr convex_hull_pts,
-                                                     pcl::PointCloud<PointNormal>::Ptr prev_checked_plane_cloud, std::string res_path);
 
 };
 
