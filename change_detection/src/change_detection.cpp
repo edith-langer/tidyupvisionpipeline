@@ -161,12 +161,12 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
 
 
     //TODO create detectedobjects
-    //TODO create filter method, which downsamples objects and filter all planar/small/smallVolume objects
 
     //------------------------------LOCAL VERIFICATION IF WANTED--------------------------------------------------------
     int cnt = 0;
     std::vector<DetectedObject> curr_obj_static, ref_obj_static;
     if (do_LV_before_matching_ && curr_objects.size() != 0 && ref_objects.size() != 0) {
+
         std::string LV_path =  output_path_ + "/LV_output/";
         boost::filesystem::create_directories(LV_path);
 
@@ -665,8 +665,8 @@ void ChangeDetection::objectRegionGrowing(pcl::PointCloud<PointNormal>::Ptr clou
         //            cloud_crop->points[inliers[p]] = nan_point;
         //        }
 
-        pcl::io::savePCDFileBinary("/home/edith/crop_no_plane" + std::to_string(i) + ".pcd", *cloud_crop);
-        pcl::io::savePCDFileBinary("/home/edith/object_cloud" + std::to_string(i) + ".pcd", *object_cloud);
+        //pcl::io::savePCDFileBinary("/home/edith/crop_no_plane" + std::to_string(i) + ".pcd", *cloud_crop);
+        //pcl::io::savePCDFileBinary("/home/edith/object_cloud" + std::to_string(i) + ".pcd", *object_cloud);
 
 
         pcl::PointCloud<pcl::Normal>::Ptr scene_normals (new pcl::PointCloud<pcl::Normal>);
