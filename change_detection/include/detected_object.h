@@ -48,19 +48,19 @@ public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     DetectedObject(){}
 
+    //Constructor when we know the ID (e.g. extracted from a DB)
+    DetectedObject(int id, pcl::PointCloud<PointNormal>::Ptr object_cloud, pcl::PointCloud<PointNormal>::Ptr plane_cloud,
+                   ObjectState object_state = UNKNOWN, std::string object_folder_path = "") : unique_id_(id), object_cloud_(object_cloud),
+        plane_cloud_(plane_cloud), state_(object_state), object_folder_path_(object_folder_path) {
+        removeNANsAndDownsample(object_cloud);
+
+    }
+
     DetectedObject(pcl::PointCloud<PointNormal>::Ptr object_cloud, pcl::PointCloud<PointNormal>::Ptr plane_cloud,
                    ObjectState object_state = UNKNOWN, std::string object_folder_path = "") : unique_id_(++s_id), object_cloud_(object_cloud),
         plane_cloud_(plane_cloud), state_(object_state), object_folder_path_(object_folder_path) {
-        pcl::PointCloud<PointNormal>::Ptr obj_wo_nans(new pcl::PointCloud<PointNormal>);
-        std::vector<int> nan_ind;
-        pcl::removeNaNFromPointCloud(*object_cloud, *obj_wo_nans, nan_ind);
 
-        object_cloud_ = obj_wo_nans;
-        object_cloud_->is_dense = true;
-
-        object_cloud_ds_.reset(new pcl::PointCloud<PointNormal>);
-        object_cloud_ds_ = downsampleCloudVG(object_cloud_, ds_voxel_size);
-        object_cloud_ds_->is_dense = true;
+        removeNANsAndDownsample(object_cloud);
     }
 
     pcl::PointCloud<PointNormal>::Ptr plane_cloud_;
@@ -89,6 +89,14 @@ public:
         object_cloud_->clear();
         object_cloud_ds_->clear();
     }
+
+    static void setIDCounter(int latest_id) {
+        s_id = latest_id;
+    }
+
+    static int getIDCounter() {
+        return s_id;
+    }
     
 protected:
     static int s_id;
@@ -97,6 +105,19 @@ private:
     int unique_id_;
     pcl::PointCloud<PointNormal>::Ptr object_cloud_;
     pcl::PointCloud<PointNormal>::Ptr object_cloud_ds_;
+
+    void inline removeNANsAndDownsample(pcl::PointCloud<PointNormal>::Ptr object_cloud) {
+        pcl::PointCloud<PointNormal>::Ptr obj_wo_nans(new pcl::PointCloud<PointNormal>);
+        std::vector<int> nan_ind;
+        pcl::removeNaNFromPointCloud(*object_cloud, *obj_wo_nans, nan_ind);
+
+        object_cloud_ = obj_wo_nans;
+        object_cloud_->is_dense = true;
+
+        object_cloud_ds_.reset(new pcl::PointCloud<PointNormal>);
+        object_cloud_ds_ = downsampleCloudVG(object_cloud_, ds_voxel_size);
+        object_cloud_ds_->is_dense = true;
+    }
 };
 
 #endif // DETECTED_OBJECT_H
