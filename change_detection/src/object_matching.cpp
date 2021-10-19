@@ -697,7 +697,7 @@ std::vector<pcl::PointIndices> ObjectMatching::clusterOutliersBySize(const pcl::
 
 
 
-std::vector<v4r::ObjectHypothesesGroup> ObjectMatching::callRecognizer(DetectedObject obj) {
+std::vector<v4r::ObjectHypothesesGroup> ObjectMatching::callRecognizer(DetectedObject &obj) {
     double ppf_rec_time_sum = 0.0;
 
     /// Create separate rgb and normal clouds in both cases to be able to call the recognizer
@@ -717,8 +717,10 @@ std::vector<v4r::ObjectHypothesesGroup> ObjectMatching::callRecognizer(DetectedO
         //if we haven't tried to match this object with this model
         if (obj.already_checked_model_ids.find(m.getID()) == obj.already_checked_model_ids.end())
         {
-            objects_to_look_for.push_back(std::to_string(m.getID()));
-            obj.already_checked_model_ids.insert(m.getID());
+            if (boost::filesystem::exists(m.object_folder_path_)) {
+                objects_to_look_for.push_back(std::to_string(m.getID()));
+                obj.already_checked_model_ids.insert(m.getID());
+            }
         }
     }
     if (objects_to_look_for.size() == 0) { //otherwise the recognizer checks for all objects in the model folder

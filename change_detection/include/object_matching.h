@@ -120,7 +120,7 @@ private:
     bool isBelowPlane(pcl::PointCloud<PointNormal>::ConstPtr model, pcl::PointCloud<PointNormal>::ConstPtr plane_cloud);
     std::vector<Match> weightedGraphMatching(std::vector<ObjectHypothesesStruct> global_hypotheses,
                                              std::function<float(FitnessScoreStruct)> computeFitness, double fitness_thr);
-    std::vector<v4r::ObjectHypothesesGroup> callRecognizer(DetectedObject obj);
+    std::vector<v4r::ObjectHypothesesGroup> callRecognizer(DetectedObject &obj);
     std::pair<HypothesesStruct, bool> filterRecoHypothesis(DetectedObject obj, std::vector<v4r::ObjectHypothesis::Ptr> hg);
     std::vector<ObjectHypothesesStruct> createHypotheses();
     float computeMeanPointDistance(pcl::PointCloud<PointNormal>::ConstPtr ref_object, pcl::PointCloud<PointNormal>::ConstPtr curr_obj);
