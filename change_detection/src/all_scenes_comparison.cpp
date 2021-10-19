@@ -151,12 +151,15 @@ void removeModelFolder(DetectedObject ro, std::string ppf_model_path, std::strin
     boost::filesystem::remove_all(orig_path);
 }
 
-void updateDetectedObjects(std::vector<DetectedObject>& ref_result, std::vector<DetectedObject>& curr_result) {
+bool updateDetectedObjects(std::vector<DetectedObject>& ref_result, std::vector<DetectedObject>& curr_result) {
+    bool isObjectOrModelNew= false;
     for (DetectedObject ro : ref_result) {
         if (ro.state_ == ObjectState::REMOVED) {
             //means that there was a partial match and have to create a new model folder
-            if (ro.object_folder_path_ == "") {
+            //if (ro.object_folder_path_ == "") {
+            if (pot_removed_obj.find(ro.getID()) == pot_removed_obj.end()) {
                 createNewModelFolder(ro, ppf_model_path, result_path);
+                isObjectOrModelNew= true;
             }
             pot_removed_obj[ro.getID()] = ro;
         } else if (ro.state_ == ObjectState::DISPLACED) {
@@ -178,6 +181,8 @@ void updateDetectedObjects(std::vector<DetectedObject>& ref_result, std::vector<
     }
     for (DetectedObject co : curr_result) {
         if (co.state_ == ObjectState::NEW) {
+            if (pot_new_obj.find(co.getID()) == pot_new_obj.end())
+                isObjectOrModelNew= true;
             pot_new_obj[co.getID()] = co;
         } else if (co.state_ == ObjectState::DISPLACED) {
             curr_displaced_obj[co.getID()] = co;
@@ -187,6 +192,7 @@ void updateDetectedObjects(std::vector<DetectedObject>& ref_result, std::vector<
             pot_new_obj.erase(co.getID());
         }
     }
+    return isObjectOrModelNew;
 }
 
 //map of map because for one plane several occurrences are possible
@@ -428,7 +434,7 @@ int main(int argc, char* argv[])
     std::sort(all_scene_paths.begin(), all_scene_paths.end());
 
     std::string timestamp = getCurrentTime();
-    base_result_path =  base_result_path + "/" + timestamp + (do_LV_before_matching ? "_withLV":"" ) + "_filterUnwantedObjects_clusterMatchingDiff_fullPipeline/";
+    base_result_path =  base_result_path + "/" + timestamp + (do_LV_before_matching ? "_withLV":"" ) + "_filterUnwantedObjects_clusterMatchingDiff_mergeObj10deg_fullPipeline/";
     //----------------------------setup result folder----------------------------------
     //start at 1 because element 0 is scene1 without objects
     for (size_t idx = 1; idx < all_scene_paths.size(); idx++)
@@ -587,24 +593,26 @@ int main(int argc, char* argv[])
                 }
             }
 
-            //one last chance to match objects
             //after collecting potential new and removed objects from the plane, try to match them
             if (pot_removed_obj.size() != 0 && pot_new_obj.size() != 0) {
                 std::string merge_object_parts_folder = result_path + "/leftover_mergeObjectParts";
                 boost::filesystem::create_directory(merge_object_parts_folder);
 
-                //transform map into vec to be able to call object matching
-                std::vector<DetectedObject> pot_rem_obj_vec, pot_new_obj_vec;
-                pot_rem_obj_vec = fromMapToValVec(pot_removed_obj);
-                pot_new_obj_vec = fromMapToValVec(pot_new_obj);
-                ObjectMatching matching(pot_rem_obj_vec, pot_new_obj_vec, ppf_model_path, ppf_config_path_path);
-                std::vector<DetectedObject> ref_result, curr_result;
-                matching.compute(ref_result, curr_result);
+                bool newObjectOrModel = true;
+                while(newObjectOrModel) {
+                    //transform map into vec to be able to call object matching
+                    std::vector<DetectedObject> pot_rem_obj_vec, pot_new_obj_vec;
+                    pot_rem_obj_vec = fromMapToValVec(pot_removed_obj);
+                    pot_new_obj_vec = fromMapToValVec(pot_new_obj);
+                    ObjectMatching matching(pot_rem_obj_vec, pot_new_obj_vec, ppf_model_path, ppf_config_path_path);
+                    std::vector<DetectedObject> ref_result, curr_result;
+                    matching.compute(ref_result, curr_result);
 
-                ChangeDetection::mergeObjectParts(ref_result, merge_object_parts_folder);
-                ChangeDetection::mergeObjectParts(curr_result, merge_object_parts_folder);
+                    ChangeDetection::mergeObjectParts(ref_result, merge_object_parts_folder);
+                    ChangeDetection::mergeObjectParts(curr_result, merge_object_parts_folder);
 
-                updateDetectedObjects(ref_result, curr_result);
+                    newObjectOrModel = updateDetectedObjects(ref_result, curr_result);
+                }
             }
 
 

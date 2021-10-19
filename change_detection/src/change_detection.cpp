@@ -95,7 +95,6 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
         if (i == curr_objects.size()-1)
             extract.setKeepOrganized(false); //in the last round we can destroy the index order
         extract.filter(*curr_non_object_points);
-        pcl::io::savePCDFileBinary(ref_res_path + "/curr_non_object_points.pcd", *curr_non_object_points);
     }
     //could be empty if the method was called with only one valid plane reconstruction
     if (!curr_non_object_points->empty()) {
@@ -1157,7 +1156,7 @@ void ChangeDetection::mergeObjectParts(std::vector<DetectedObject> &detected_obj
                     *combined_object += *object_j_refined;
                     pcl::PointCloud<pcl::Normal>::Ptr scene_normals(new pcl::PointCloud<pcl::Normal>);
                     pcl::copyPointCloud(*combined_object, *scene_normals);
-                    RegionGrowing<PointNormal, PointNormal> region_growing(combined_object, good_pts, scene_normals, false, 15.0, 5);
+                    RegionGrowing<PointNormal, PointNormal> region_growing(combined_object, good_pts, scene_normals, false, 15.0, 10);
                     std::vector<int> add_object_ind = region_growing.compute();
 
                     //nothing was added to the static/displaced object
