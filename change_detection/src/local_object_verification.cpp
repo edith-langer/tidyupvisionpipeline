@@ -1,18 +1,20 @@
 #include "local_object_verification.h"
 
-LocalObjectVerification::LocalObjectVerification(pcl::PointCloud<PointNormal>::Ptr ref_object, //pcl::PointCloud<PointNormal>::Ptr ref_plane,
-                                                 pcl::PointCloud<PointNormal>::Ptr curr_object, //pcl::PointCloud<PointNormal>::Ptr curr_plane,
-                                                 LocalObjectVerificationParams params)
-{
-    this->ref_object_ = ref_object;
-    this->curr_object_ = curr_object;
-    //    this->ref_plane_ = ref_plane;
-    //    this->curr_plane_ = curr_plane;
+//LocalObjectVerification::LocalObjectVerification(pcl::PointCloud<PointNormal>::ConstPtr ref_object, //pcl::PointCloud<PointNormal>::Ptr ref_plane,
+//                                                 pcl::PointCloud<PointNormal>::ConstPtr curr_object, //pcl::PointCloud<PointNormal>::Ptr curr_plane,
+//                                                 LocalObjectVerificationParams params)
+//{
+//    pcl::copyPointCloud(*ref_object, *ref_object_);
+//    pcl::copyPointCloud(*curr_object, *curr_object_);
+//    //this->ref_object_ = ref_object;
+//    //this->curr_object_ = curr_object;
+//    //    this->ref_plane_ = ref_plane;
+//    //    this->curr_plane_ = curr_plane;
 
-    params_ = params;
+//    params_ = params;
 
-    this->debug_output_path="";
-}
+//    this->debug_output_path="";
+//}
 
 void LocalObjectVerification::setDebugOutputPath (std::string debug_output_path) {
     this->debug_output_path = debug_output_path;
@@ -72,14 +74,16 @@ LVResult LocalObjectVerification::computeLV() {
     //        pcl::removeNaNFromPointCloud(*curr_plane_, * curr_plane_, ind);
     std::vector<int> ref_nan;
     std::vector<int> curr_nan;
-    ref_object_->is_dense = false;
-    curr_object_->is_dense = false;
 
     pcl::PointCloud<PointNormal>::Ptr ref_object_noNans(new pcl::PointCloud<PointNormal>);
+    pcl::copyPointCloud(*ref_object_, *ref_object_noNans);
+    ref_object_noNans->is_dense = false;
     pcl::PointCloud<PointNormal>::Ptr curr_object_noNans(new pcl::PointCloud<PointNormal>);
+    pcl::copyPointCloud(*curr_object_, *curr_object_noNans);
+    curr_object_noNans->is_dense = false;
 
-    pcl::removeNaNFromPointCloud(*ref_object_, *ref_object_noNans, ref_nan);
-    pcl::removeNaNFromPointCloud(*curr_object_, *curr_object_noNans, curr_nan);
+    pcl::removeNaNFromPointCloud(*ref_object_noNans, *ref_object_noNans, ref_nan);
+    pcl::removeNaNFromPointCloud(*curr_object_noNans, *curr_object_noNans, curr_nan);
 
     std::cout << "Ref cluster has " << ref_object_noNans->size() << " points." << std::endl;
     std::cout << "Curr cluster has " << curr_object_noNans->size() << " points." << std::endl;
@@ -109,7 +113,7 @@ LVResult LocalObjectVerification::computeLV() {
 
     std::cout << "has converged:" << icp.hasConverged() << " score: " << icp.getFitnessScore() << std::endl;
 
-    if (icp.hasConverged() && icp.getFitnessScore()) {
+    if (icp.hasConverged()) {
         result.transform_obj_to_model = icp.getFinalTransformation();
         v4r::apps::PPFRecognizerParameter params;
         FitnessScoreStruct fitness_score  = ObjectMatching::computeModelFitness(curr_object_registered, ref_object_noNans, params);

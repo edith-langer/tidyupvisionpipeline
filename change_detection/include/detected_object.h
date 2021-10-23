@@ -49,21 +49,21 @@ public:
     DetectedObject(){}
 
     //Constructor when we know the ID (e.g. extracted from a DB)
-    DetectedObject(int id, pcl::PointCloud<PointNormal>::Ptr object_cloud, pcl::PointCloud<PointNormal>::Ptr plane_cloud,
+    DetectedObject(int id, pcl::PointCloud<PointNormal>::Ptr object_cloud, pcl::PointCloud<PointNormal>::Ptr plane_cloud, pcl::ModelCoefficients::Ptr plane_coeffs,
                    ObjectState object_state = UNKNOWN, std::string object_folder_path = "") : unique_id_(id), object_cloud_(object_cloud),
-        plane_cloud_(plane_cloud), state_(object_state), object_folder_path_(object_folder_path) {
+        plane_cloud_(plane_cloud), plane_coeffs_(plane_coeffs), state_(object_state), object_folder_path_(object_folder_path) {
         removeNANsAndDownsample(object_cloud);
-
     }
 
-    DetectedObject(pcl::PointCloud<PointNormal>::Ptr object_cloud, pcl::PointCloud<PointNormal>::Ptr plane_cloud,
+    DetectedObject(pcl::PointCloud<PointNormal>::Ptr object_cloud, pcl::PointCloud<PointNormal>::Ptr plane_cloud, pcl::ModelCoefficients::Ptr plane_coeffs,
                    ObjectState object_state = UNKNOWN, std::string object_folder_path = "") : unique_id_(++s_id), object_cloud_(object_cloud),
-        plane_cloud_(plane_cloud), state_(object_state), object_folder_path_(object_folder_path) {
+        plane_cloud_(plane_cloud), plane_coeffs_(plane_coeffs), state_(object_state), object_folder_path_(object_folder_path) {
 
         removeNANsAndDownsample(object_cloud);
     }
 
     pcl::PointCloud<PointNormal>::Ptr plane_cloud_;
+    pcl::ModelCoefficients::Ptr plane_coeffs_;
     std::string object_folder_path_;
     ObjectState state_;
     std::unordered_set<int> already_checked_model_ids;

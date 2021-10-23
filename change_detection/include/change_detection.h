@@ -76,9 +76,15 @@ public:
     void objectRegionGrowing(pcl::PointCloud<PointNormal>::Ptr cloud, std::vector<PlaneWithObjInd> &objects, int max_object_size = 5000); // std::numeric_limits<int>::max());
     void mergeObjects(std::vector<PlaneWithObjInd>& objects);
     pcl::PointCloud<PointNormal>::Ptr fromObjectVecToObjectCloud(const std::vector<PlaneWithObjInd> objects, pcl::PointCloud<PointNormal>::Ptr cloud, bool keepOrganized=true);
+    pcl::PointCloud<PointNormal>::Ptr fromDetObjectVecToCloud(const std::vector<DetectedObject> object_vec, bool withStaticObjects=true);
     void upsampleObjectsAndPlanes(pcl::PointCloud<PointNormal>::Ptr orig_cloud, pcl::PointCloud<PointNormal>::Ptr ds_cloud,
                                   std::vector<PlaneWithObjInd> &objects, double leaf_size, std::string res_path);
+    void upsampleObjectsAndPlanes(pcl::PointCloud<PointNormal>::Ptr orig_cloud, std::vector<DetectedObject> &objects, double leaf_size, std::string res_path);
+    std::tuple<pcl::PointCloud<PointNormal>::Ptr, std::vector<int> > upsampleObjects(pcl::octree::OctreePointCloudSearch<PointNormal>::Ptr octree, pcl::PointCloud<PointNormal>::ConstPtr orig_input_cloud,
+                                                                                     pcl::PointCloud<PointNormal>::ConstPtr objects_ds_cloud, std::string output_path, int counter);
+
     DetectedObject fromPlaneIndObjToDetectedObject (pcl::PointCloud<PointNormal>::Ptr curr_cloud, PlaneWithObjInd obj);
+    void performLV(std::vector<DetectedObject> &ref_objects, std::vector<DetectedObject> &curr_objects);
 
 
     static void mergeObjectParts(std::vector<DetectedObject> &detected_objects, std::string merge_object_parts_folder);
@@ -108,9 +114,8 @@ private:
     pcl::PointCloud<PointNormal>::Ptr ref_checked_plane_point_cloud_;
 
 
-    std::tuple<pcl::PointCloud<PointNormal>::Ptr, std::vector<int> > upsampleObjects(pcl::octree::OctreePointCloudSearch<PointNormal>::Ptr octree, pcl::PointCloud<PointNormal>::ConstPtr orig_input_cloud,
-                                                                                     pcl::PointCloud<PointNormal>::ConstPtr objects_ds_cloud, std::string output_path, int counter);
     void saveObjectsWithPlanes(std::string path, const std::vector<PlaneWithObjInd> objects, pcl::PointCloud<PointNormal>::Ptr cloud);
+    void saveObjectsWithPlanes(std::string path, const std::vector<DetectedObject> objects);
     std::vector<double> filterBasedOnColor(std::vector<PlaneWithObjInd>& objects, pcl::PointCloud<PointNormal>::Ptr cloud, int _nr_binsh=10);
     std::vector<int> removePlanarObjects (std::vector<PlaneWithObjInd>& objects, pcl::PointCloud<PointNormal>::Ptr cloud, float _plane_dist_thr=0.01);
     int checkPlanarity (PlaneWithObjInd& objects, pcl::PointCloud<PointNormal>::Ptr cloud, float _plane_dist_thr);

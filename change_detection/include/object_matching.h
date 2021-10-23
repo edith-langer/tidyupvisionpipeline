@@ -113,6 +113,7 @@ private:
     std::vector<DetectedObject> object_vec_;
     std::string model_path_;
     std::string cfg_path_;
+    std::string cloud_matches_dir_;
 
     boost::shared_ptr<v4r::apps::PPFRecognizer<pcl::PointXYZRGB> > rec_;
 

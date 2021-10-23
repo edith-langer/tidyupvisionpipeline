@@ -45,9 +45,11 @@ struct LVResult {
 class LocalObjectVerification
 {
 public:
-    LocalObjectVerification(pcl::PointCloud<PointNormal>::Ptr ref_object, //pcl::PointCloud<PointNormal>::Ptr ref_plane,
-                            pcl::PointCloud<PointNormal>::Ptr curr_object, //pcl::PointCloud<PointNormal>::Ptr curr_plane,
-                            LocalObjectVerificationParams params);
+    LocalObjectVerification(pcl::PointCloud<PointNormal>::ConstPtr ref_object, //pcl::PointCloud<PointNormal>::Ptr ref_plane,
+                            pcl::PointCloud<PointNormal>::ConstPtr curr_object, //pcl::PointCloud<PointNormal>::Ptr curr_plane,
+                            LocalObjectVerificationParams params) : ref_object_(ref_object), curr_object_(curr_object), params_(params) {
+        this->debug_output_path="";
+    }
     LVResult computeLV();
     void setDebugOutputPath (std::string debug_output_path);
 
@@ -60,8 +62,8 @@ public:
     }
 
 private:
-    pcl::PointCloud<PointNormal>::Ptr ref_object_;
-    pcl::PointCloud<PointNormal>::Ptr curr_object_;
+    pcl::PointCloud<PointNormal>::ConstPtr ref_object_;
+    pcl::PointCloud<PointNormal>::ConstPtr curr_object_;
     pcl::PointCloud<PointNormal>::Ptr ref_plane_;
     pcl::PointCloud<PointNormal>::Ptr curr_plane_;
 

@@ -19,6 +19,13 @@ ObjectMatching::ObjectMatching(std::vector<DetectedObject> model_vec, std::vecto
     object_vec_ = object_vec;
     model_path_ = model_path;
     cfg_path_ = cfg_path;
+
+    boost::filesystem::path model_path_orig(model_path_);
+    cloud_matches_dir_ =  model_path_orig.remove_trailing_separator().parent_path().string() + "/matches/";
+    if (boost::filesystem::exists(cloud_matches_dir_))
+        boost::filesystem::remove_all(cloud_matches_dir_);
+
+
 }
 
 std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_result, std::vector<DetectedObject> &curr_result)
@@ -249,7 +256,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
 
                 //save the new partly matched object
                 boost::filesystem::path model_path_orig(model_path_);
-                std::string cloud_matches_dir =  model_path_orig.remove_trailing_separator().parent_path().string() + "/matches/object" + std::to_string(match.object_id) + "_part_match";
+                std::string cloud_matches_dir =  cloud_matches_dir_ + "/object" + std::to_string(match.object_id) + "_part_match";
                 boost::filesystem::create_directories(cloud_matches_dir);
                 std::string result_cloud_path = cloud_matches_dir + "/conf_" + std::to_string(match.fitness_score.object_conf) + "_" + std::to_string(match.fitness_score.model_conf) + "_model_" + std::to_string(match.model_id) + "_" +
                         (ppf_params.ppf_rec_pipeline_.use_color_ ? "_color" : "");
@@ -292,7 +299,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
 
                     pcl::PointCloud<PointNormal>::Ptr ds_cloud = downsampleCloudVG(remaining_cluster_cloud, ds_leaf_size_LV);
                     if (!isObjectUnwanted(ds_cloud, min_object_volume, min_object_size_ds, std::numeric_limits<int>::max(), 0.01, 0.9)) {
-                        DetectedObject diff_model_part(remaining_cluster_cloud, ro_iter->plane_cloud_, ObjectState::REMOVED, "");
+                        DetectedObject diff_model_part(remaining_cluster_cloud, ro_iter->plane_cloud_, ro_iter->plane_coeffs_, ObjectState::REMOVED, "");
                         model_vec_.push_back(diff_model_part);
                     }
                 }
@@ -318,7 +325,7 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
 
                     pcl::PointCloud<PointNormal>::Ptr ds_cloud = downsampleCloudVG(remaining_cluster_cloud, ds_leaf_size_LV);
                     if (!isObjectUnwanted(ds_cloud, min_object_volume, min_object_size_ds, std::numeric_limits<int>::max(), 0.01, 0.9)) {
-                        DetectedObject diff_object_part(remaining_cluster_cloud, co_iter->plane_cloud_, ObjectState::NEW, "");
+                        DetectedObject diff_object_part(remaining_cluster_cloud, co_iter->plane_cloud_, co_iter->plane_coeffs_, ObjectState::NEW, "");
                         object_vec_.push_back(diff_object_part);
                     }
                 }
@@ -820,7 +827,7 @@ std::vector<ObjectHypothesesStruct> ObjectMatching::createHypotheses() {
 
 
         boost::filesystem::path model_path_orig(model_path_);
-        std::string cloud_matches_dir =  model_path_orig.remove_trailing_separator().parent_path().string() + "/matches/object" + std::to_string(object_vec_[i].getID());
+        std::string cloud_matches_dir =  cloud_matches_dir_ + "/object" + std::to_string(object_vec_[i].getID());
         boost::filesystem::create_directories(cloud_matches_dir);
         pcl::io::savePCDFile(cloud_matches_dir + "/object.pcd", *object_vec_[i].getObjectCloud());
 
