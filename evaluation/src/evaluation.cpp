@@ -88,7 +88,7 @@ int getMostFrequentNumber(std::vector<int> v);
 int remainingClusters (pcl::PointCloud<PointLabel>::Ptr cloud, float cluster_thr, int min_cluster_size, std::string path="");
 void writeSumResultsToFile(std::vector<Measurements> all_gt_results, std::vector<Measurements> all_tp_results, std::vector<Measurements> all_fp_results, std::string path);
 int extractDetectedObjects(std::vector<GTObject> gt_objects, pcl::PointCloud<PointLabel>::Ptr result_cloud, std::vector<std::string> & gt_obj, std::vector<std::string> & det_obj);
-void writeObjectSummaryToFile(std::map<std::string, int> & gt_obj_count, std::map<std::string, int> & det_obj_count, std::map<std::string, int> &tp_class_obj_count, std::string path);
+void writeObjectSummaryToFile(std::map<std::string, int> & gt_obj_count, std::map<std::string, int> & det_obj_count, std::map<std::string, int> &tp_class_obj_count, std::vector<Measurements> &all_fp_results, std::string path);
 int computeFP(std::map<std::string, pcl::PointCloud<PointLabel>::Ptr> obj_name_cloud_map, pcl::PointCloud<PointLabel>::Ptr static_leftover_cloud, std::string path, bool is_static=false);
 pcl::PointCloud<PointLabel>::Ptr downsampleCloud(pcl::PointCloud<PointLabel>::Ptr input, double leafSize);
 GTCloudsAndNumbers createGTforSceneComp(const std::map<std::string, std::map<std::string, pcl::PointCloud<PointLabel>::Ptr> > scene_annotations_map,
@@ -557,14 +557,14 @@ int main(int argc, char* argv[])
     std::ofstream result_stream (result_file);
     result_stream.close();
     writeSumResultsToFile(all_gt_results, all_tp_results, all_fp_results, result_file);
-    writeObjectSummaryToFile(gt_obj_count_comp, det_obj_count_comp, tp_class_object_count, result_file);
+    writeObjectSummaryToFile(gt_obj_count_comp, det_obj_count_comp, tp_class_object_count, all_fp_results, result_file);
 
     //write results based on detected objects
     result_stream.open (result_file, std::ofstream::out | std::ofstream::app);
     result_stream << "\n\n-------------------------------Based on detected objects----------------------------------------\n";
     result_stream.close();
     writeSumResultsToFile(reduced_all_gt_results, reduced_all_tp_results, reduced_all_fp_results, result_file);
-    writeObjectSummaryToFile(reduced_gt_obj_count_comp, reduced_det_obj_count_comp, reduced_tp_class_object_count, result_file);
+    writeObjectSummaryToFile(reduced_gt_obj_count_comp, reduced_det_obj_count_comp, reduced_tp_class_object_count, reduced_all_fp_results, result_file);
 
 }
 
@@ -714,7 +714,8 @@ void mergeVectorIntoMap (std::map<std::string, int> & global_map, std::vector<st
     }
 }
 
-void writeObjectSummaryToFile(std::map<std::string, int> & gt_obj_count, std::map<std::string, int> & det_obj_count, std::map<std::string, int> & tp_class_obj_count, std::string path) {
+void writeObjectSummaryToFile(std::map<std::string, int> & gt_obj_count, std::map<std::string, int> & det_obj_count, std::map<std::string, int> & tp_class_obj_count,
+                              std::vector<Measurements> &all_fp_results, std::string path) {
     int count_gt_obj = 0;
     int count_det_obj = 0;
     int count_tp_class_obj = 0;
@@ -741,9 +742,20 @@ void writeObjectSummaryToFile(std::map<std::string, int> & gt_obj_count, std::ma
         }
         result_file << "\n";
     }
+
+    //sum of FP
+    int FP_sum=0;
+    for (Measurements m : all_fp_results) {
+        FP_sum += m.nr_moved_obj;
+        FP_sum += m.nr_novel_obj;
+        FP_sum += m.nr_removed_obj;
+        FP_sum += m.nr_static_obj;
+    }
+
     result_file << "#objects in scene: " << count_gt_obj << "\n";
     result_file << "#detected objects: " << count_det_obj << "\n";
     result_file << "#objects correctly classified: " << count_tp_class_obj << "\n";
+    result_file << "#objects wrongly classified: " << FP_sum << "\n";
 }
 
 void writeSumResultsToFile(std::vector<Measurements> all_gt_results, std::vector<Measurements> all_tp_results, std::vector<Measurements> all_fp_results,
