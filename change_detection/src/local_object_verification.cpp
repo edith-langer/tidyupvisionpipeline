@@ -205,6 +205,7 @@ LVResult LocalObjectVerification::computeLV() {
                     curr_orig_ind.push_back(curr_nan[diff_ind[i]]);
                 result.obj_non_matching_pts = curr_orig_ind;
             }
+            result.is_matched=true;
             return result;
         }
     }
@@ -221,6 +222,7 @@ LVResult LocalObjectVerification::computeLV() {
     result.obj_non_matching_pts = curr_orig_ind;
 
     result.transform_obj_to_model = Eigen::Matrix4f::Identity();
+    result.is_matched = false;
 
     return result;
 }

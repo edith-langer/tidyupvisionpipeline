@@ -40,6 +40,7 @@ struct LVResult {
     std::vector<int> model_non_matching_pts;
     Eigen::Matrix<float,4,4,Eigen::DontAlign> transform_obj_to_model;
     FitnessScoreStruct fitness_score;
+    bool is_matched;
 };
 
 class LocalObjectVerification

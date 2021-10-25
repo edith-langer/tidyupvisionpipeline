@@ -1448,8 +1448,8 @@ void ChangeDetection::performLV(std::vector<DetectedObject> &ref_objects, std::v
 
                 LVResult lv_result = local_verification.computeLV();
 
-                //check if transformation is different to identy matrix --> remove element in object vector
-                if (lv_result.transform_obj_to_model != Eigen::Matrix4f::Identity()) {
+                //remove element in object vector
+                if (lv_result.is_matched) {
                     //full match reference
                     if (lv_result.model_non_matching_pts.size() == 0) {
                         ro_it->state_ = ObjectState::STATIC;
