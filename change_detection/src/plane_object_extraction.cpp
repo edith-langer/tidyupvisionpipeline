@@ -153,18 +153,33 @@ std::vector<PlaneWithObjInd> ExtractObjectsFromPlanes::extractObjectInd(pcl::Poi
 
     pcl::io::savePCDFileBinary(result_path_ + "/potential_plane.pcd", *cropped_cloud_filtered);
 
+    std::cout << "potential plane size  " << cropped_cloud_filtered->size() << std::endl;
+    std::vector<int> nan_ind_pot_plane;
+    pcl::PointCloud<PointNormal>::Ptr pot_plane_no_nans (new pcl::PointCloud<PointNormal>);
+    pcl::removeNaNFromPointCloud(*cropped_cloud_filtered, *pot_plane_no_nans, nan_ind_pot_plane);
+    std::cout << "potential plane size  wo nans" << pot_plane_no_nans->size() << std::endl;
+
     //cluster the cropped cloud
     pcl::EuclideanClusterExtraction<PointNormal> ec_cropped_cloud;
     std::vector<pcl::PointIndices> clusters_cropped_cloud;
     ec_cropped_cloud.setClusterTolerance (0.05);
     ec_cropped_cloud.setMinClusterSize (50);
     ec_cropped_cloud.setMaxClusterSize (std::numeric_limits<int>::max());
-    ec_cropped_cloud.setInputCloud (cropped_cloud_filtered);
+    ec_cropped_cloud.setInputCloud (pot_plane_no_nans);
     ec_cropped_cloud.extract (clusters_cropped_cloud);
 
     if (clusters_cropped_cloud.size() == 0) {
         std::cerr << "Not enough points left after cropping the input plane cloud " << std::endl;
         return {}; //return empty object
+    }
+
+    std::cout << "clustered planes into " << clusters_cropped_cloud.size() << " planes" << std::endl;
+
+    //transform back to original indices
+    for (pcl::PointIndices &ind : clusters_cropped_cloud) {
+        for (size_t i = 0; i < ind.indices.size(); i++) {
+                ind.indices[i] = nan_ind_pot_plane[ind.indices[i]];
+        }
     }
 
     for (size_t c = 0; c < clusters_cropped_cloud.size(); c++) { //the size should be quite small, usually 1 or 2 planes
@@ -265,8 +280,15 @@ std::vector<PlaneWithObjInd> ExtractObjectsFromPlanes::extractObjectInd(pcl::Poi
         ec_normal.setClusterTolerance (0.05);
         ec_normal.setMinClusterSize (5);
         ec_normal.setMaxClusterSize (std::numeric_limits<int>::max());
-        ec_normal.setInputCloud (cloud_plane_filtered);
+        ec_normal.setInputCloud (plane_filtered_wo_nans_cloud);
         ec_normal.extract (cluster_indices_normals);
+
+        //transform back to original indices
+        for (pcl::PointIndices &ind : cluster_indices_normals) {
+            for (size_t i = 0; i < ind.indices.size(); i++) {
+                ind.indices[i] = nan_ind[ind.indices[i]];
+            }
+        }
 
         //this code should not be needed. it merges separated planes again in one object, but we are looking at one plane only anyway
         pcl::PointIndices::Ptr c_ind (new pcl::PointIndices);
@@ -424,20 +446,33 @@ std::vector<PlaneWithObjInd> ExtractObjectsFromPlanes::extractObjectInd(pcl::Poi
             //return PlaneWithObjInd();
         }
     }
+    std::cout << "Done with extracting objects from planes" << std::endl;
     return plane_object_result;
 }
 
 
 
 void ExtractObjectsFromPlanes::filter_flying_objects(pcl::PointCloud<PointNormal>::Ptr cloud, pcl::PointIndices::Ptr ind, pcl::PointCloud<PointNormal>::Ptr plane) {
+    std::vector<int> nan_ind;
+    pcl::PointCloud<PointNormal>::Ptr cloud_no_nans(new pcl::PointCloud<PointNormal>);
+    pcl::removeNaNFromPointCloud(*cloud, *cloud_no_nans, nan_ind);
+    
     // Create EuclideanClusterExtraction and set parameters
     pcl::EuclideanClusterExtraction<PointNormal> ec;
     std::vector<pcl::PointIndices> cluster_indices;
     ec.setClusterTolerance (0.015);
     ec.setMinClusterSize (15);
     ec.setMaxClusterSize (std::numeric_limits<int>::max());
-    ec.setInputCloud (cloud);
+    ec.setInputCloud (cloud_no_nans);
     ec.extract (cluster_indices);
+
+    //transform back to original indices
+    for (pcl::PointIndices &ind : cluster_indices) {
+        for (size_t i = 0; i < ind.indices.size(); i++) {
+            ind.indices[i] = nan_ind[ind.indices[i]];
+        }
+    }
+
 
     std::vector<int> ind_to_be_removed;
     int i = 0;
@@ -483,14 +518,26 @@ void ExtractObjectsFromPlanes::filter_flying_objects(pcl::PointCloud<PointNormal
 }
 
 void ExtractObjectsFromPlanes::filter_planar_objects(pcl::PointCloud<PointNormal>::Ptr cloud, pcl::PointIndices::Ptr ind) {
+
+    std::vector<int> nan_ind;
+    pcl::PointCloud<PointNormal>::Ptr cloud_no_nans(new pcl::PointCloud<PointNormal>);
+    pcl::removeNaNFromPointCloud(*cloud, *cloud_no_nans, nan_ind);
+
     // Create EuclideanClusterExtraction and set parameters
     pcl::EuclideanClusterExtraction<PointNormal> ec;
     std::vector<pcl::PointIndices> cluster_indices;
     ec.setClusterTolerance (0.015);
     ec.setMinClusterSize (15);
     ec.setMaxClusterSize (std::numeric_limits<int>::max());
-    ec.setInputCloud (cloud);
+    ec.setInputCloud (cloud_no_nans);
     ec.extract (cluster_indices);
+
+    //transform back to original indices
+    for (pcl::PointIndices &ind : cluster_indices) {
+        for (size_t i = 0; i < ind.indices.size(); i++) {
+            ind.indices[i] = nan_ind[ind.indices[i]];
+        }
+    }
 
     std::vector<int> ind_to_be_removed;
     int i = 0;
