@@ -669,24 +669,32 @@ std::vector<pcl::PointIndices> ObjectMatching::clusterOutliersBySize(const pcl::
     if (cloud->empty()) {
         return cluster_indices;
     }
+
+    pcl::PointCloud<PointNormal>::Ptr cloud_copy(new pcl::PointCloud<PointNormal>);
+    pcl::copyPointCloud(*cloud, *cloud_copy);
+    cloud_copy->is_dense = false;
+
     //check if cloud only consists of nans
     std::vector<int> nan_ind;
     pcl::PointCloud<PointNormal>::Ptr no_nans_cloud(new pcl::PointCloud<PointNormal>);
-    pcl::removeNaNFromPointCloud(*cloud, *no_nans_cloud, nan_ind);
+    pcl::removeNaNFromPointCloud(*cloud_copy, *no_nans_cloud, nan_ind);
     if (no_nans_cloud->size() == 0) {
         return cluster_indices;
-    }
-
-    pcl::search::KdTree<PointNormal>::Ptr tree (new pcl::search::KdTree<PointNormal>);
-    tree->setInputCloud (cloud);
+    } 
 
     pcl::EuclideanClusterExtraction<PointNormal> ec;
     ec.setClusterTolerance (cluster_thr);
     ec.setMinClusterSize (min_cluster_size);
     ec.setMaxClusterSize (max_cluster_size);
-    ec.setSearchMethod(tree);
-    ec.setInputCloud (cloud);
+    ec.setInputCloud (no_nans_cloud);
     ec.extract (cluster_indices);
+
+    //transform back to original indices
+    for (pcl::PointIndices &ind : cluster_indices) {
+        for (size_t i = 0; i < ind.indices.size(); i++) {
+            ind.indices[i] = nan_ind[ind.indices[i]];
+        }
+    }
 
     //extract the indices that got filtered
     std::vector<int> cluster_ind;
