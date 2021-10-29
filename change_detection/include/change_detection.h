@@ -73,7 +73,7 @@ public:
     std::vector<PlaneWithObjInd> getObjectsFromPlane(pcl::PointCloud<PointNormal>::Ptr input_cloud, Eigen::Vector4f plane_coeffs,
                                                      pcl::PointCloud<pcl::PointXYZ>::Ptr convex_hull_pts,
                                                      pcl::PointCloud<PointNormal>::Ptr prev_checked_plane_cloud, std::string res_path);
-    void objectRegionGrowing(pcl::PointCloud<PointNormal>::Ptr cloud, std::vector<PlaneWithObjInd> &objects, int max_object_size = 5000); // std::numeric_limits<int>::max());
+    void objectRegionGrowing(pcl::PointCloud<PointNormal>::Ptr cloud, std::vector<PlaneWithObjInd> &objects, int max_object_size=std::numeric_limits<int>::max()); // std::numeric_limits<int>::max());
     void mergeObjects(std::vector<PlaneWithObjInd>& objects);
     pcl::PointCloud<PointNormal>::Ptr fromObjectVecToObjectCloud(const std::vector<PlaneWithObjInd> objects, pcl::PointCloud<PointNormal>::Ptr cloud, bool keepOrganized=true);
     pcl::PointCloud<PointNormal>::Ptr fromDetObjectVecToCloud(const std::vector<DetectedObject> object_vec, bool withStaticObjects=true);

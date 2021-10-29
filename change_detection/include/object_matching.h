@@ -95,7 +95,7 @@ class ObjectMatching
 {
 public:
     ObjectMatching(std::vector<DetectedObject> model_vec, std::vector<DetectedObject> object_vec,
-                   std::string model_path, std::string cfg_path);
+                   std::string model_path, std::string cfg_path, std::string obj_match_dir="");
 
     std::vector<Match> compute(std::vector<DetectedObject> &ref_result, std::vector<DetectedObject> &curr_result);
     static FitnessScoreStruct computeModelFitness(pcl::PointCloud<PointNormal>::ConstPtr object, pcl::PointCloud<PointNormal>::ConstPtr model,

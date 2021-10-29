@@ -14,19 +14,20 @@ Eigen::Vector3f rgb2lab(const Eigen::Vector3i &rgb) {
 }
 
 ObjectMatching::ObjectMatching(std::vector<DetectedObject> model_vec, std::vector<DetectedObject> object_vec,
-                               std::string model_path, std::string cfg_path) {
+                               std::string model_path, std::string cfg_path, std::string obj_match_dir) {
     model_vec_ = model_vec;
     object_vec_ = object_vec;
     model_path_ = model_path;
     cfg_path_ = cfg_path;
 
-    boost::filesystem::path model_path_orig(model_path_);
-    cloud_matches_dir_ =  model_path_orig.remove_trailing_separator().parent_path().string() + "/matches/";
-    if (boost::filesystem::exists(cloud_matches_dir_))
-        boost::filesystem::remove_all(cloud_matches_dir_);
-
-
+    if (obj_match_dir=="") {
+        boost::filesystem::path model_path_orig(model_path_);
+        cloud_matches_dir_ =  model_path_orig.remove_trailing_separator().parent_path().string() + "/matches/";
+    } else {
+        cloud_matches_dir_ = obj_match_dir;
+    }
 }
+
 
 std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_result, std::vector<DetectedObject> &curr_result)
 {

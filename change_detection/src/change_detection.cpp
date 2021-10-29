@@ -175,7 +175,7 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
     //------------------------------LOCAL VERIFICATION IF WANTED--------------------------------------------------------
 
 
-    if (do_LV_before_matching_ && curr_objects_from_plane.size() != 0 && ref_objects_from_plane.size() != 0) {
+    if (do_LV_before_matching_ && curr_obj_vec.size() != 0 && ref_obj_vec.size() != 0) {
         performLV(ref_obj_vec, curr_obj_vec);
 
         pcl::PointCloud<PointNormal>::Ptr ref_obj_cloud = fromDetObjectVecToCloud(ref_obj_vec, false);
@@ -199,10 +199,11 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
         if (!novel_objects_cloud->empty())
             pcl::io::savePCDFileBinary(curr_res_path + "/upsampled_objects.pcd", *novel_objects_cloud);
 
-        filterUnwantedObjects(curr_obj_vec, min_object_volume, min_object_size_ds);
+        filterUnwantedObjects(curr_obj_vec, min_object_volume, min_object_size_ds, max_object_size_ds);
         novel_objects_cloud = fromDetObjectVecToCloud(curr_obj_vec, false);
         if (!novel_objects_cloud->empty())
             pcl::io::savePCDFileBinary(curr_res_path + "/final_objects.pcd", *novel_objects_cloud);
+
 
         //save each object including its supporting plane
         std::string objects_with_planes_path = curr_res_path + "/final_objects_with_planes/";
@@ -223,10 +224,11 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
         if (!disappeared_objects_cloud->empty())
             pcl::io::savePCDFileBinary(ref_res_path + "/upsampled_objects.pcd", *disappeared_objects_cloud);
 
-        filterUnwantedObjects(curr_obj_vec, min_object_volume, min_object_size_ds);
+        filterUnwantedObjects(ref_obj_vec, min_object_volume, min_object_size_ds, max_object_size_ds);
         disappeared_objects_cloud = fromDetObjectVecToCloud(ref_obj_vec, false);
         if (!disappeared_objects_cloud->empty())
             pcl::io::savePCDFileBinary(ref_res_path + "/final_objects.pcd", *disappeared_objects_cloud);
+
 
         //save each object including its supporting plane
         std::string objects_with_planes_path = ref_res_path + "/final_objects_with_planes/";
@@ -556,16 +558,16 @@ void ChangeDetection::objectRegionGrowing(pcl::PointCloud<PointNormal>::Ptr clou
                 std::abs(maxPt_orig_object.z - minPt_orig_object.z) < 10*std::abs(maxPt_object.z - minPt_object.z) ) //otherwise something went wrong with the region growing (expanded too much)
             objects[i].obj_indices = orig_object_ind;
     }
-    std::cout << "Original number of objects: " << objects.size() << ", objects after region growing (big ones got filtered): ";
-    objects.erase(
-                std::remove_if(
-                    objects.begin(),
-                    objects.end(),
-                    [&](PlaneWithObjInd const & p) { return p.obj_indices.size() > max_object_size; }
-                ),
-            objects.end()
-            );
-    std::cout << objects.size() << std::endl;
+//    std::cout << "Original number of objects: " << objects.size() << ", objects after region growing (big ones got filtered): ";
+//    objects.erase(
+//                std::remove_if(
+//                    objects.begin(),
+//                    objects.end(),
+//                    [&](PlaneWithObjInd const & p) { return p.obj_indices.size() > max_object_size; }
+//                ),
+//            objects.end()
+//            );
+//    std::cout << objects.size() << std::endl;
 }
 
 pcl::PointCloud<PointNormal>::Ptr ChangeDetection::fromObjectVecToObjectCloud(const std::vector<PlaneWithObjInd> objects, pcl::PointCloud<PointNormal>::Ptr cloud, bool keepOrganized) {
