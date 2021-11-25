@@ -201,7 +201,7 @@ std::vector<PlaneWithObjInd> ExtractObjectsFromPlanes::extractObjectInd(pcl::Poi
         seg.setModelType (pcl::SACMODEL_PERPENDICULAR_PLANE);
         seg.setMaxIterations(500);
         seg.setMethodType (pcl::SAC_RANSAC);
-        seg.setDistanceThreshold (0.01);
+        seg.setDistanceThreshold (0.015);
         seg.setAxis(Eigen::Vector3f(0,0,1));
         seg.setEpsAngle(5.0f * (M_PI/180.0f)); //without setting an angle, the axis is ignored and all planes get segmented
         pcl::ModelCoefficients::Ptr new_plane_coefficients (new pcl::ModelCoefficients);

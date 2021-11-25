@@ -772,11 +772,11 @@ std::pair<HypothesesStruct, bool> ObjectMatching::filterRecoHypothesis(DetectedO
         pcl::transformPointCloudWithNormals(*obj.getObjectCloud(), *object_aligned, (h->pose_refinement_ * h->transform_).inverse()); /// pose_refinment contains ICP result
         int model_id = std::stoi(h->model_id_);
         std::vector<DetectedObject>::iterator ro_iter = std::find_if( model_vec_.begin(), model_vec_.end(),[&model_id](DetectedObject const &o) {return o.getID() == model_id; });
-        if (isBelowPlane(model_aligned_refined, obj.plane_cloud_) && isBelowPlane(object_aligned, ro_iter->plane_cloud_)) {
-            std::cout << "Model and object " << h->model_id_ << " are below plane and therefore not a valid solution" << std::endl;
-            h->confidence_ = 0.0;
-            continue;
-        }
+//        if (isBelowPlane(model_aligned_refined, obj.plane_cloud_) && isBelowPlane(object_aligned, ro_iter->plane_cloud_)) {
+//            std::cout << "Model and object " << h->model_id_ << " are below plane and therefore not a valid solution" << std::endl;
+//            h->confidence_ = 0.0;
+//            continue;
+//        }
 
         //compute confidence based on normals and color between object and model
         FitnessScoreStruct fitness_score  = computeModelFitness(obj.getObjectCloud(), model_aligned_refined, ppf_params);
