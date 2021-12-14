@@ -7,40 +7,37 @@
 
 
 --- scene_differencing_points
-	- similar to the PCL method, but returns in addition to the cloud containing the different points, also vectors with 		   corresponding and non-corresponding points
+	- similar to the PCL method, but returns in addition to the cloud containing the different points, also vectors with corresponding and non-corresponding point indices
 
 
 --- plane_object_extraction
-	- extracts points from a specific semantic class, cluster them and extract horizontal planes.
+	- extracts planes from a cloud based on given plane coefficients and convex hull points
 	- for each plane create a convex hull and segment points in the polygonal prism
 	- filter flying objects
-	- returns a vector of PlaneWithObjInd objects (consists of plane indices, avg_z and plane coefficients; and all indices above 		  that plane). Not clustered into separate objects!
-
-
---- extract_objects_using_semantics
-	- this is a wrapper for plane_object_extraction
-	- it also checks if points that are semantically labeled as objects are close to an extracted objects --> merge them
-	- returns a vector of PlaneWithObjInd objects
+	- returns a vector of PlaneWithObjInd objects (consists of plane indices, avg_z and plane coefficients; and all indices above that plane). Not clustered into separate objects!
 
 
 --- local_object_verification
-	- points extracted from a plane get clustered (TODO. MOVE THAT)
-	- for each object crop the two clouds, align the supporting planes and try to align the object with ICP
-	- score = linear weighting of color correspondence and extend of overlap
+	- input are two object clouds
+	- use ICP in 4D(x,y,z,z-axis alignment) to align the two clouds
+	- if aligned, compute a fitness score
+
+
+--- object_matching
+	- call ppf-recognizer to create hypotheses
+	- compute a fitness score for each object-model hypothesis and keep the best one
+	- create a bipartite graph and use the fitness score as edge weights
+	- compute maximum weighted matching of the graph
+	- separate the matching part from the object and model and compute again hypotheses and the graph (loop until no more match is found)
 
 
 --- change_detection
-	- downsample input clouds for faster computation of semantic segmentation, object extraction from planes and LV
-	- filter out objects with similar color to their supporting plane and which are planar (helpfull if reconstruction generates 		  double floors)
-	- region growing to  get missed object parts and also to filter out false positives when it becomes too big
-	- upsample again to have the results in full resolution (= add points within 1 cm distance). This has the effect that some 		  points at the bottom removed via plane_object_extraction get recovered
+	- downsample input clouds for faster computation of object extraction from planes and local verification
+	- filter out objects with similar color to their supporting plane and which are planar (helpfull if reconstruction generates double floors)
+	- region growing to  get missed object parts 
+	- upsample again to have the results in full resolution (= add points within 1 cm distance). This has the effect that some points at the bottom removed via plane_object_extraction get recovered
+	- perform object matching
 
 
-My original change detection method detects objects labeled as object from semenatic segmentation and smaller objects that were fused with the supporting plane.
 
-TODO:
-main.cpp:532 recomputing normals; exchange that with the normal combination used for ppf now
-
-
-only part of the objects is detected when it is not fully placed on the plane. e.g at the table edge
 
