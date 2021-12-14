@@ -283,6 +283,9 @@ int main(int argc, char* argv[])
 
         std::string comp_string = scene_comp.ref_scene + "-" + scene_comp.curr_scene;
         scene_GTClouds_map[comp_string] = gt_cloud_numbers;
+
+        pcl::io::savePCDFileBinary(scene_comp.result_path + "/" + scene_comp.ref_scene + "-" + scene_comp.curr_scene + ".pcd", *(gt_cloud_numbers.clouds.ref_GT_cloud));
+        pcl::io::savePCDFileBinary(scene_comp.result_path + "/" + scene_comp.curr_scene + "-" + scene_comp.ref_scene + ".pcd", *(gt_cloud_numbers.clouds.curr_GT_cloud));
     }
 
 
@@ -319,12 +322,18 @@ int main(int argc, char* argv[])
         readInput(scene_comp.result_path + "/" + c_static_obj_name, c_static_obj_cloud);
 
 
+        //HACK because I forgot to label the result clouds. i only did for static and moved objects
+        for (size_t i = 0; i < novel_obj_cloud->points.size(); i++)
+        {
+            novel_obj_cloud->points[i].label = ObjectClass::NEW;
+        }
         //combine all detected results and compare it to GT
         std::vector<std::string> curr_gt_obj_vec, curr_det_obj_vec, ref_gt_obj_vec, ref_det_obj_vec;
         pcl::PointCloud<PointLabel>::Ptr curr_result_cloud(new pcl::PointCloud<PointLabel>());
         *curr_result_cloud += *c_moved_obj_cloud;
         *curr_result_cloud += *c_static_obj_cloud;
         *curr_result_cloud += *novel_obj_cloud;
+
         if (!curr_result_cloud->empty())
             pcl::io::savePCDFileBinary( scene_comp.result_path+"/curr_result_cloud.pcd", *curr_result_cloud);
         result.nr_det_obj = extractDetectedObjects(gt_cloud_numbers.curr_objects, curr_result_cloud, curr_gt_obj_vec, curr_det_obj_vec);
@@ -333,6 +342,11 @@ int main(int argc, char* argv[])
         std::sort(curr_det_obj_vec.begin(), curr_det_obj_vec.end());
 
 
+        //HACK because I forgot to label the result clouds. i only did for static and moved objects
+        for (size_t i = 0; i < removed_obj_cloud->points.size(); i++)
+        {
+            removed_obj_cloud->points[i].label = ObjectClass::REMOVED;
+        }
         pcl::PointCloud<PointLabel>::Ptr ref_result_cloud(new pcl::PointCloud<PointLabel>());
         *ref_result_cloud += *r_moved_obj_cloud;
         *ref_result_cloud += *r_static_obj_cloud;
@@ -370,6 +384,8 @@ int main(int argc, char* argv[])
         reduced_scene_annotations_map[scene_comp.ref_scene] = ref_scene_GT_obj;
 
         const GTCloudsAndNumbers reduced_gt_cloud_numbers  = createGTforSceneComp(reduced_scene_annotations_map, scene_comp);
+        pcl::io::savePCDFileBinary(scene_comp.result_path + "/reduced_" + scene_comp.ref_scene + "-" + scene_comp.curr_scene + ".pcd", *(reduced_gt_cloud_numbers.clouds.ref_GT_cloud));
+        pcl::io::savePCDFileBinary(scene_comp.result_path + "/reduced_" + scene_comp.curr_scene + "-" + scene_comp.ref_scene + ".pcd", *(reduced_gt_cloud_numbers.clouds.curr_GT_cloud));
 
         std::vector<std::string> reduced_curr_gt_obj_vec, reduced_curr_det_obj_vec, reduced_ref_gt_obj_vec, reduced_ref_det_obj_vec;
         reduced_result.nr_det_obj = extractDetectedObjects(reduced_gt_cloud_numbers.curr_objects, curr_result_cloud, reduced_curr_gt_obj_vec, reduced_curr_det_obj_vec);
@@ -663,7 +679,7 @@ int computeFP(std::map<std::string, pcl::PointCloud<PointLabel>::Ptr> obj_name_c
     if (!FP_GT_obj_cloud->empty())
         pcl::io::savePCDFileBinary(path + "_gt_obj.pcd", *FP_GT_obj_cloud);
 
-    //there is nothing like FP for static objects when it is not a object from the GT
+    //there is nothing like FP for static objects when it is not an object from the GT
     if (!is_static) {
         extract.setNegative (true);
         extract.filter(*no_nans_cloud);
@@ -674,7 +690,7 @@ int computeFP(std::map<std::string, pcl::PointCloud<PointLabel>::Ptr> obj_name_c
     return fp;
 }
 
-//an object counts as detected if > 50 % of it was detected
+//an object counts as detected if > 10 % of it was detected
 //assuming there is one object instance in the scene!
 int extractDetectedObjects(std::vector<GTObject> gt_objects, pcl::PointCloud<PointLabel>::Ptr result_cloud,
                            std::vector<std::string> & gt_obj_vec, std::vector<std::string> & det_obj_vec) {
@@ -756,6 +772,7 @@ void writeObjectSummaryToFile(std::map<std::string, int> & gt_obj_count, std::ma
     result_file << "#detected objects: " << count_det_obj << "\n";
     result_file << "#objects correctly classified: " << count_tp_class_obj << "\n";
     result_file << "#objects wrongly classified: " << FP_sum << "\n";
+    result_file.close();
 }
 
 void writeSumResultsToFile(std::vector<Measurements> all_gt_results, std::vector<Measurements> all_tp_results, std::vector<Measurements> all_fp_results,
@@ -906,9 +923,6 @@ GTCloudsAndNumbers createGTforSceneComp(const std::map<std::string, std::map<std
     }
 
     gt_measurements.nr_det_obj = gt_measurements.nr_novel_obj + gt_measurements.nr_removed_obj + gt_measurements.nr_static_obj + gt_measurements.nr_moved_obj;
-
-    pcl::io::savePCDFileBinary(scene_comp.result_path + "/" + scene_comp.ref_scene + "-" + scene_comp.curr_scene + ".pcd", *ref_GT_cloud);
-    pcl::io::savePCDFileBinary(scene_comp.result_path + "/" + scene_comp.curr_scene + "-" + scene_comp.ref_scene + ".pcd", *curr_GT_cloud);
 
     GTLabeledClouds gt_labeled_clouds;
     gt_labeled_clouds.ref_GT_cloud = ref_GT_cloud;

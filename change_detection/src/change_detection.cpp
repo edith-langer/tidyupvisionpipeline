@@ -70,14 +70,14 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
     std::string curr_res_path =  output_path_ + "/curr_cloud/";
     boost::filesystem::create_directories(curr_res_path);
     std::vector<PlaneWithObjInd> curr_objects_from_plane = getObjectsFromPlane(curr_cloud_downsampled, curr_plane_coeffs_, curr_convex_hull_pts_,
-                                                                    curr_checked_plane_point_cloud_, curr_res_path);
+                                                                               curr_checked_plane_point_cloud_, curr_res_path);
 
 
     //---Reference objects---
     std::string ref_res_path =  output_path_ + "/ref_cloud/";
     boost::filesystem::create_directories(ref_res_path);
     std::vector<PlaneWithObjInd> ref_objects_from_plane = getObjectsFromPlane(ref_cloud_downsampled, ref_plane_coeffs_, ref_convex_hull_pts_,
-                                                                   ref_checked_plane_point_cloud_, ref_res_path);
+                                                                              ref_checked_plane_point_cloud_, ref_res_path);
 
 
 
@@ -199,6 +199,13 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
         if (!novel_objects_cloud->empty())
             pcl::io::savePCDFileBinary(curr_res_path + "/upsampled_objects.pcd", *novel_objects_cloud);
 
+        //statistical outlier removal - maybe it can separate objects where EF inserted points between them to be smoother
+//        statisticalOutlierFilter(curr_obj_vec, 50, 2.0);
+//        separateDetectedObjects(curr_obj_vec);
+//        novel_objects_cloud = fromDetObjectVecToCloud(curr_obj_vec, false);
+//        if (!novel_objects_cloud->empty())
+//            pcl::io::savePCDFileBinary(curr_res_path + "/splitted_after_outlier_removal.pcd", *novel_objects_cloud);
+
         filterUnwantedObjects(curr_obj_vec, min_object_volume, min_object_size_ds, max_object_size_ds);
         novel_objects_cloud = fromDetObjectVecToCloud(curr_obj_vec, false);
         if (!novel_objects_cloud->empty())
@@ -224,6 +231,13 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
         if (!disappeared_objects_cloud->empty())
             pcl::io::savePCDFileBinary(ref_res_path + "/upsampled_objects.pcd", *disappeared_objects_cloud);
 
+        //statistical outlier removal - maybe it can separate objects where EF inserted points between them to be smoother
+//        statisticalOutlierFilter(ref_obj_vec, 50, 2.0);
+//        separateDetectedObjects(ref_obj_vec);
+//        disappeared_objects_cloud = fromDetObjectVecToCloud(ref_obj_vec, false);
+//        if (!disappeared_objects_cloud->empty())
+//            pcl::io::savePCDFileBinary(ref_res_path + "/splitted_after_outlier_removal.pcd", *disappeared_objects_cloud);
+
         filterUnwantedObjects(ref_obj_vec, min_object_volume, min_object_size_ds, max_object_size_ds);
         disappeared_objects_cloud = fromDetObjectVecToCloud(ref_obj_vec, false);
         if (!disappeared_objects_cloud->empty())
@@ -239,14 +253,14 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
 
 
     //recompute Fitness score with upsampled version (there should be exactly the same number of static ref and curr objects)
-//    v4r::apps::PPFRecognizerParameter params;
-//    for (size_t i = 0; i < ref_obj_static.size(); i++) {
-//        pcl::PointCloud<PointNormal>::Ptr object_aligned (new pcl::PointCloud<PointNormal>);
-//        pcl::transformPointCloudWithNormals(*curr_obj_static[i].getObjectCloud(), *object_aligned, ref_obj_static[i].match_.transform);
-//        FitnessScoreStruct fitness_score = ObjectMatching::computeModelFitness(object_aligned, ref_obj_static[i].getObjectCloud(), params);
-//        ref_obj_static[i].match_.fitness_score = fitness_score;
-//        curr_obj_static[i].match_.fitness_score = fitness_score;
-//    }
+    //    v4r::apps::PPFRecognizerParameter params;
+    //    for (size_t i = 0; i < ref_obj_static.size(); i++) {
+    //        pcl::PointCloud<PointNormal>::Ptr object_aligned (new pcl::PointCloud<PointNormal>);
+    //        pcl::transformPointCloudWithNormals(*curr_obj_static[i].getObjectCloud(), *object_aligned, ref_obj_static[i].match_.transform);
+    //        FitnessScoreStruct fitness_score = ObjectMatching::computeModelFitness(object_aligned, ref_obj_static[i].getObjectCloud(), params);
+    //        ref_obj_static[i].match_.fitness_score = fitness_score;
+    //        curr_obj_static[i].match_.fitness_score = fitness_score;
+    //    }
 
 
 
@@ -558,16 +572,16 @@ void ChangeDetection::objectRegionGrowing(pcl::PointCloud<PointNormal>::Ptr clou
                 std::abs(maxPt_orig_object.z - minPt_orig_object.z) < 10*std::abs(maxPt_object.z - minPt_object.z) ) //otherwise something went wrong with the region growing (expanded too much)
             objects[i].obj_indices = orig_object_ind;
     }
-//    std::cout << "Original number of objects: " << objects.size() << ", objects after region growing (big ones got filtered): ";
-//    objects.erase(
-//                std::remove_if(
-//                    objects.begin(),
-//                    objects.end(),
-//                    [&](PlaneWithObjInd const & p) { return p.obj_indices.size() > max_object_size; }
-//                ),
-//            objects.end()
-//            );
-//    std::cout << objects.size() << std::endl;
+    //    std::cout << "Original number of objects: " << objects.size() << ", objects after region growing (big ones got filtered): ";
+    //    objects.erase(
+    //                std::remove_if(
+    //                    objects.begin(),
+    //                    objects.end(),
+    //                    [&](PlaneWithObjInd const & p) { return p.obj_indices.size() > max_object_size; }
+    //                ),
+    //            objects.end()
+    //            );
+    //    std::cout << objects.size() << std::endl;
 }
 
 pcl::PointCloud<PointNormal>::Ptr ChangeDetection::fromObjectVecToObjectCloud(const std::vector<PlaneWithObjInd> objects, pcl::PointCloud<PointNormal>::Ptr cloud, bool keepOrganized) {
@@ -1547,4 +1561,48 @@ pcl::PointCloud<PointNormal>::Ptr ChangeDetection::fromDetObjectVecToCloud(const
             *object_cloud += *(obj.getObjectCloud());
     }
     return object_cloud;
+}
+
+void ChangeDetection::statisticalOutlierFilter (std::vector<DetectedObject> &object_vec, int meanK, float std) {
+    pcl::PointCloud<PointNormal>::Ptr cloud_filtered(new pcl::PointCloud<PointNormal>);
+    for (DetectedObject &obj : object_vec) {
+        // Create the filtering object
+        pcl::StatisticalOutlierRemoval<PointNormal> sor;
+        sor.setInputCloud (obj.getObjectCloud());
+        sor.setMeanK (meanK);
+        sor.setStddevMulThresh (std);
+        sor.filter (*cloud_filtered);
+        obj.setObjectCloud(cloud_filtered);
+    }
+}
+
+void ChangeDetection::separateDetectedObjects (std::vector<DetectedObject> &object_vec) {
+    std::vector<DetectedObject> add_objects;
+    for (DetectedObject &obj : object_vec) {
+        std::vector<int> small_cluster_ind;
+        //we need a copy because we replace the object cloud with the first extracted cluster
+        pcl::PointCloud<PointNormal>::Ptr orig_obj_cloud(new pcl::PointCloud<PointNormal>);
+        pcl::copyPointCloud(*obj.getObjectCloud(), *orig_obj_cloud);
+        std::vector<pcl::PointIndices> cluster_ind_vec = ObjectMatching::clusterOutliersBySize(obj.getObjectCloud(), small_cluster_ind, 0.014, min_object_size_ds);
+        for (size_t c = 0; c < cluster_ind_vec.size(); c++) {
+            pcl::PointCloud<PointNormal>::Ptr cluster_cloud(new pcl::PointCloud<PointNormal>);
+            pcl::ExtractIndices<PointNormal> extract;
+            extract.setInputCloud (orig_obj_cloud);
+            pcl::PointIndices::Ptr cluster_ind(new pcl::PointIndices);
+            cluster_ind->indices = cluster_ind_vec[c].indices;
+            extract.setIndices (cluster_ind);
+            extract.setNegative (false);
+            extract.setKeepOrganized(false);
+            extract.filter(*cluster_cloud);
+            if (c == 0) {
+                //replace the original cloud
+                obj.setObjectCloud(cluster_cloud);
+            } else {
+                //create a new object
+                DetectedObject new_obj(cluster_cloud, obj.plane_cloud_, obj.plane_coeffs_);
+                add_objects.push_back(new_obj);
+            }
+        }
+    }
+    object_vec.insert(object_vec.end(), add_objects.begin(), add_objects.end());
 }

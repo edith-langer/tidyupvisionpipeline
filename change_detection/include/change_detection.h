@@ -17,6 +17,7 @@
 #include <pcl/filters/extract_indices.h>
 #include <pcl/segmentation/extract_clusters.h>
 #include <pcl/search/impl/search.hpp>
+#include <pcl/filters/statistical_outlier_removal.h>
 
 #include <boost/filesystem.hpp>
 
@@ -85,7 +86,8 @@ public:
 
     DetectedObject fromPlaneIndObjToDetectedObject (pcl::PointCloud<PointNormal>::Ptr curr_cloud, PlaneWithObjInd obj);
     void performLV(std::vector<DetectedObject> &ref_objects, std::vector<DetectedObject> &curr_objects);
-
+    void statisticalOutlierFilter (std::vector<DetectedObject> &object_vec, int meanK, float std);
+    void separateDetectedObjects (std::vector<DetectedObject> &object_vec);
 
     static void mergeObjectParts(std::vector<DetectedObject> &detected_objects, std::string merge_object_parts_folder);
     static void filterSmallVolumes(std::vector<DetectedObject> &objects, double volume_thr, int min_obj_size=0);

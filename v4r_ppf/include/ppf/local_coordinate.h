@@ -51,6 +51,7 @@ namespace ppf {
 /// For a given scene point that belong to an object instance, 6D pose of this instance can be unambiguously defined by
 /// a model point (to which this scene point corresponds) and a rotation angle around their aligned normals. These two
 /// values together are denoted as LC. See [VLLM18] page 5 for more details.
+/// A Method for 6D Pose Estimation of Free-Form Rigid Objects Using Point Pair Features on Range Data
 ///
 /// The structure provides several helper functions to compute transforms and angles related with local coordinates.
 struct LocalCoordinate {
