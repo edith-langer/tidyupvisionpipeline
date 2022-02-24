@@ -104,7 +104,7 @@ public:
     static std::vector<pcl::PointIndices> clusterOutliersBySize(const pcl::PointCloud<PointNormal>::ConstPtr cloud, std::vector<int> &removed_ind, float cluster_thr,
                                                                 int min_cluster_size=15, int max_cluster_size=std::numeric_limits<int>::max());
     static bool isObjectPlanar(pcl::PointCloud<PointNormal>::ConstPtr object, float plane_dist_thr, float plane_acc_thr);
-    void matchedPartGrowing(pcl::PointCloud<PointNormal>::ConstPtr obj_cloud, pcl::PointCloud<PointNormal>::Ptr matched_part,
+    static void matchedPartGrowing(pcl::PointCloud<PointNormal>::ConstPtr obj_cloud, pcl::PointCloud<PointNormal>::Ptr matched_part,
                                                                          pcl::PointCloud<PointNormal>::Ptr remaining_part, std::vector<int> good_pt_ids);
 
 
@@ -114,6 +114,7 @@ private:
     std::string model_path_;
     std::string cfg_path_;
     std::string cloud_matches_dir_;
+    std::map<int, std::vector<int>> invalid_matches; //object_id as key
 
     boost::shared_ptr<v4r::apps::PPFRecognizer<pcl::PointXYZRGB> > rec_;
 

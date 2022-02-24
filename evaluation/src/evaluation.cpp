@@ -35,6 +35,9 @@ int min_cluster_size = 200;
 
 double ds_voxel_size = 0.002;
 
+float min_det_pts = 0.5;
+float min_fp_pts = 0.2; // if 1/5 of the points of an object have a wrong label, it counts as FP
+
 std::string anno_file_name = "merged_plane_clouds_ds002";
 
 std::string c_dis_obj_name = "curr_displaced_objects.pcd";
@@ -47,7 +50,14 @@ std::string r_static_obj_name = "ref_static_objects.pcd";
 
 //we also need the correspondences for static/moved objects
 //NEW = 0; REMOVED = 10; STATIC = [20,30,...950], MOVED = [1000, 1010,...1950]
-enum ObjectClass {NEW = 0, REMOVED=1, UNKNOWN=2}; // STATIC = [20,30,...950], MOVED = [1000, 1010,...1950] - weird int assignment is better for visualization
+enum ObjectClass {STATIC = 0, MOVED = 1, REMOVED = 2, NEW = 3, UNKNOWN=4}; // STATIC = [20,30,...950], MOVED = [1000, 1010,...1950] - weird int assignment is better for visualization
+
+std::vector<std::vector<int>> conf_mat = { { 0, 0, 0, 0, 0 },
+                                           { 0, 0, 0, 0, 0 },
+                                           { 0, 0, 0, 0, 0 },
+                                           { 0, 0, 0, 0, 0 }}; //the last column is used to count the numbers of wrongly assigned moved objects, which can not be counted otherwise
+std::vector<std::vector<int>> conf_mat_red = conf_mat;
+
 
 struct SceneCompInfo {
     std::string ref_scene;
@@ -66,7 +76,7 @@ struct GTObject {
     int class_label;
     GTObject(std::string _name, pcl::PointCloud<PointLabel>::Ptr _object_cloud, int _class_label=ObjectClass::UNKNOWN) :
         name(_name), object_cloud(_object_cloud), class_label(_class_label) {}
-
+    bool is_detected = false;
 };
 
 struct Measurements {
@@ -87,18 +97,24 @@ struct GTCloudsAndNumbers {
 int getMostFrequentNumber(std::vector<int> v);
 int remainingClusters (pcl::PointCloud<PointLabel>::Ptr cloud, float cluster_thr, int min_cluster_size, std::string path="");
 void writeSumResultsToFile(std::vector<Measurements> all_gt_results, std::vector<Measurements> all_tp_results, std::vector<Measurements> all_fp_results, std::string path);
-int extractDetectedObjects(std::vector<GTObject> gt_objects, pcl::PointCloud<PointLabel>::Ptr result_cloud, std::vector<std::string> & gt_obj, std::vector<std::string> & det_obj);
+int extractDetectedObjects(std::vector<GTObject> &gt_objects, pcl::PointCloud<PointLabel>::Ptr result_cloud, std::vector<std::string> & gt_obj, std::vector<std::string> & det_obj);
 void writeObjectSummaryToFile(std::map<std::string, int> & gt_obj_count, std::map<std::string, int> & det_obj_count, std::map<std::string, int> &tp_class_obj_count, std::vector<Measurements> &all_fp_results, std::string path);
-int computeFP(std::map<std::string, pcl::PointCloud<PointLabel>::Ptr> obj_name_cloud_map, pcl::PointCloud<PointLabel>::Ptr static_leftover_cloud, std::string path, bool is_static=false);
+int computeFP(std::map<std::string, pcl::PointCloud<PointLabel>::Ptr> obj_name_cloud_map, pcl::PointCloud<PointLabel>::Ptr leftover_cloud, std::string path, bool is_static=false);
 pcl::PointCloud<PointLabel>::Ptr downsampleCloud(pcl::PointCloud<PointLabel>::Ptr input, double leafSize);
 GTCloudsAndNumbers createGTforSceneComp(const std::map<std::string, std::map<std::string, pcl::PointCloud<PointLabel>::Ptr> > scene_annotations_map,
                                         const SceneCompInfo &scene_comp);
 void mergeVectorIntoMap (std::map<std::string, int> & global_map, std::vector<std::string> & local_vec);
-std::vector<std::string> checkRemovedObjects(pcl::PointCloud<PointLabel>::Ptr removed_obj_cloud, const GTCloudsAndNumbers gt_cloud_numbers, std::map<std::string, int> &tp_class_object_count);
+std::vector<std::string> checkRemovedObjects(pcl::PointCloud<PointLabel>::Ptr removed_obj_cloud, const GTCloudsAndNumbers gt_cloud_numbers, std::map<std::string,
+                                             int> &tp_class_object_count);
 std::vector<std::string> checkNovelObjects(pcl::PointCloud<PointLabel>::Ptr novel_obj_cloud, const GTCloudsAndNumbers gt_cloud_numbers, std::map<std::string, int> &tp_class_object_count);
 std::tuple<std::vector<std::string>, std::vector<std::string> > checkDisplacedObjects(pcl::PointCloud<PointLabel>::Ptr c_moved_obj_cloud, pcl::PointCloud<PointLabel>::Ptr r_moved_obj_cloud,
                                                                                       pcl::PointCloud<PointLabel>::Ptr c_static_obj_cloud, pcl::PointCloud<PointLabel>::Ptr r_static_obj_cloud,
                                                                                       const GTCloudsAndNumbers gt_cloud_numbers, std::map<std::string, int> &tp_class_object_count);
+void writeConfMatToFile( std::vector<std::vector<int>> conf_mat, std::string path);
+int categoryTransformer(int cat_label);
+void computeConfusionMat(GTCloudsAndNumbers gt_objects, pcl::PointCloud<PointLabel>::Ptr ref_result_cloud,
+                         pcl::PointCloud<PointLabel>::Ptr curr_result_cloud, std::vector<std::vector<int>> &conf_mat);
+void relabelMatches(pcl::PointCloud<PointLabel>::Ptr ref_cloud, pcl::PointCloud<PointLabel>::Ptr curr_cloud, bool isStatic);
 
 std::ostream& operator<<(std::ostream& output, Measurements const& m)
 {
@@ -300,7 +316,7 @@ int main(int argc, char* argv[])
     for (size_t i = 0; i < scenes.size(); i++) {
         const SceneCompInfo &scene_comp = scenes[i];
         std::string scene_comp_str = scene_comp.ref_scene + "-" + scene_comp.curr_scene;
-        const GTCloudsAndNumbers gt_cloud_numbers = scene_GTClouds_map[scene_comp_str];
+        GTCloudsAndNumbers gt_cloud_numbers = scene_GTClouds_map[scene_comp_str];
 
         Measurements result, FP_results;
         std::vector<std::string> ref_matched_removed, curr_matched_novel, matched_moved, matched_static;
@@ -327,6 +343,16 @@ int main(int argc, char* argv[])
         {
             novel_obj_cloud->points[i].label = ObjectClass::NEW;
         }
+
+        //HACK because I forgot to label the result clouds. i only did for static and moved objects
+        for (size_t i = 0; i < removed_obj_cloud->points.size(); i++)
+        {
+            removed_obj_cloud->points[i].label = ObjectClass::REMOVED;
+        }
+
+        relabelMatches(r_static_obj_cloud, c_static_obj_cloud, true);
+        relabelMatches(r_moved_obj_cloud, c_moved_obj_cloud, false);
+
         //combine all detected results and compare it to GT
         std::vector<std::string> curr_gt_obj_vec, curr_det_obj_vec, ref_gt_obj_vec, ref_det_obj_vec;
         pcl::PointCloud<PointLabel>::Ptr curr_result_cloud(new pcl::PointCloud<PointLabel>());
@@ -342,11 +368,6 @@ int main(int argc, char* argv[])
         std::sort(curr_det_obj_vec.begin(), curr_det_obj_vec.end());
 
 
-        //HACK because I forgot to label the result clouds. i only did for static and moved objects
-        for (size_t i = 0; i < removed_obj_cloud->points.size(); i++)
-        {
-            removed_obj_cloud->points[i].label = ObjectClass::REMOVED;
-        }
         pcl::PointCloud<PointLabel>::Ptr ref_result_cloud(new pcl::PointCloud<PointLabel>());
         *ref_result_cloud += *r_moved_obj_cloud;
         *ref_result_cloud += *r_static_obj_cloud;
@@ -383,7 +404,7 @@ int main(int argc, char* argv[])
         reduced_scene_annotations_map[scene_comp.curr_scene] = curr_scene_GT_obj;
         reduced_scene_annotations_map[scene_comp.ref_scene] = ref_scene_GT_obj;
 
-        const GTCloudsAndNumbers reduced_gt_cloud_numbers  = createGTforSceneComp(reduced_scene_annotations_map, scene_comp);
+        GTCloudsAndNumbers reduced_gt_cloud_numbers  = createGTforSceneComp(reduced_scene_annotations_map, scene_comp);
         pcl::io::savePCDFileBinary(scene_comp.result_path + "/reduced_" + scene_comp.ref_scene + "-" + scene_comp.curr_scene + ".pcd", *(reduced_gt_cloud_numbers.clouds.ref_GT_cloud));
         pcl::io::savePCDFileBinary(scene_comp.result_path + "/reduced_" + scene_comp.curr_scene + "-" + scene_comp.ref_scene + ".pcd", *(reduced_gt_cloud_numbers.clouds.curr_GT_cloud));
 
@@ -395,6 +416,8 @@ int main(int argc, char* argv[])
         mergeVectorIntoMap(reduced_gt_obj_count_comp, reduced_ref_gt_obj_vec);
         mergeVectorIntoMap(reduced_det_obj_count_comp, reduced_ref_det_obj_vec);
 
+        computeConfusionMat(gt_cloud_numbers, ref_result_cloud, curr_result_cloud, conf_mat);
+        computeConfusionMat(reduced_gt_cloud_numbers, ref_result_cloud, curr_result_cloud, conf_mat_red);
 
         /// Check REMOVED objects
         if (!removed_obj_cloud->empty()) {
@@ -574,6 +597,7 @@ int main(int argc, char* argv[])
     result_stream.close();
     writeSumResultsToFile(all_gt_results, all_tp_results, all_fp_results, result_file);
     writeObjectSummaryToFile(gt_obj_count_comp, det_obj_count_comp, tp_class_object_count, all_fp_results, result_file);
+    writeConfMatToFile(conf_mat, result_file);
 
     //write results based on detected objects
     result_stream.open (result_file, std::ofstream::out | std::ofstream::app);
@@ -581,6 +605,7 @@ int main(int argc, char* argv[])
     result_stream.close();
     writeSumResultsToFile(reduced_all_gt_results, reduced_all_tp_results, reduced_all_fp_results, result_file);
     writeObjectSummaryToFile(reduced_gt_obj_count_comp, reduced_det_obj_count_comp, reduced_tp_class_object_count, reduced_all_fp_results, result_file);
+    writeConfMatToFile(conf_mat_red, result_file);
 
 }
 
@@ -630,12 +655,12 @@ int remainingClusters (pcl::PointCloud<PointLabel>::Ptr cloud, float cluster_thr
     return cluster_indices.size();
 }
 
-int computeFP(std::map<std::string, pcl::PointCloud<PointLabel>::Ptr> obj_name_cloud_map, pcl::PointCloud<PointLabel>::Ptr static_leftover_cloud, std::string path, bool is_static) {
+int computeFP(std::map<std::string, pcl::PointCloud<PointLabel>::Ptr> obj_name_cloud_map, pcl::PointCloud<PointLabel>::Ptr leftover_cloud, std::string path, bool is_static) {
     int fp = 0;
     std::vector<int> nan_ind;
     pcl::PointCloud<PointLabel>::Ptr no_nans_cloud(new pcl::PointCloud<PointLabel>);
-    static_leftover_cloud->is_dense = false;
-    pcl::removeNaNFromPointCloud(*static_leftover_cloud, *no_nans_cloud, nan_ind);
+    leftover_cloud->is_dense = false;
+    pcl::removeNaNFromPointCloud(*leftover_cloud, *no_nans_cloud, nan_ind);
     if (no_nans_cloud->size() == 0) {
         return 0;
     }
@@ -654,8 +679,8 @@ int computeFP(std::map<std::string, pcl::PointCloud<PointLabel>::Ptr> obj_name_c
         }
         std::sort(overlapping_ind.begin(), overlapping_ind.end());
         overlapping_ind.erase(std::unique( overlapping_ind.begin(), overlapping_ind.end() ), overlapping_ind.end() );
-        //if more than 1/5 of the GT object is classified as static
-        if (overlapping_ind.size() > gt_obj.second->size()/5) {
+        //if more than 1/5 of the GT object
+        if (overlapping_ind.size() > gt_obj.second->size() * min_fp_pts) {
             fp++;
             std::cout << "FP: " << gt_obj.first << std::endl;
             all_gt_overlapping_ind.insert(all_gt_overlapping_ind.begin(), overlapping_ind.begin(), overlapping_ind.end());
@@ -690,9 +715,9 @@ int computeFP(std::map<std::string, pcl::PointCloud<PointLabel>::Ptr> obj_name_c
     return fp;
 }
 
-//an object counts as detected if > 10 % of it was detected
+//an object counts as detected if > min_det_pts of it was detected
 //assuming there is one object instance in the scene!
-int extractDetectedObjects(std::vector<GTObject> gt_objects, pcl::PointCloud<PointLabel>::Ptr result_cloud,
+int extractDetectedObjects(std::vector<GTObject> &gt_objects, pcl::PointCloud<PointLabel>::Ptr result_cloud,
                            std::vector<std::string> & gt_obj_vec, std::vector<std::string> & det_obj_vec) {
     int nr_det_obj = 0;
     pcl::search::KdTree<PointLabel>::Ptr tree (new pcl::search::KdTree<PointLabel>);
@@ -700,7 +725,7 @@ int extractDetectedObjects(std::vector<GTObject> gt_objects, pcl::PointCloud<Poi
     std::vector<int> nn_indices, overlapping_ind;
     std::vector<float> nn_distances;
 
-    for (const GTObject gt_obj : gt_objects) {
+    for (GTObject & gt_obj : gt_objects) {
         pcl::PointCloud<PointLabel>::Ptr gt_cloud = gt_obj.object_cloud;
         overlapping_ind.clear();
         for (const PointLabel p : gt_cloud->points) {
@@ -711,9 +736,10 @@ int extractDetectedObjects(std::vector<GTObject> gt_objects, pcl::PointCloud<Poi
 
         std::sort(overlapping_ind.begin(), overlapping_ind.end());
         overlapping_ind.erase(unique(overlapping_ind.begin(), overlapping_ind.end()), overlapping_ind.end());
-        if (overlapping_ind.size() > 0.1 * gt_cloud->size()) {
+        if (overlapping_ind.size() > min_det_pts * gt_cloud->size()) {
             nr_det_obj++;
             det_obj_vec.push_back(gt_obj.name);
+            gt_obj.is_detected = true;
         }
         gt_obj_vec.push_back(gt_obj.name);
     }
@@ -805,6 +831,20 @@ void writeSumResultsToFile(std::vector<Measurements> all_gt_results, std::vector
     result_file << "Ground Truth \n" << gt_sum;
     result_file << "\nTrue Positives \n" << tp_sum;
     result_file << "\nFalse Positives \n" << fp_sum;
+    result_file.close();
+}
+
+void writeConfMatToFile( std::vector<std::vector<int>> conf_mat, std::string path) {
+    std::ofstream result_file;
+    result_file.open (path, std::ofstream::out | std::ofstream::app);
+    result_file << "\n";
+
+    result_file << "\t" << "s" << "\t" << "m" << "\t" << "r" << "\t" << "n" << "\t" << "false_ass" << "\n";
+    result_file << "s\t" << conf_mat[0][0] << "\t" << conf_mat[0][1] << "\t" << conf_mat[0][2] << "\t" << conf_mat[0][3] << "\t" << conf_mat[0][4] << "\n";
+    result_file << "m\t" << conf_mat[1][0] << "\t" << conf_mat[1][1] << "\t" << conf_mat[1][2] << "\t" << conf_mat[1][3] << "\t" << conf_mat[1][4] << "\n";
+    result_file << "r\t" << conf_mat[2][0] << "\t" << conf_mat[2][1] << "\t" << conf_mat[2][2] << "\t" << conf_mat[2][3] << "\t" << conf_mat[2][4] << "\n";
+    result_file << "n\t" << conf_mat[3][0] << "\t" << conf_mat[3][1] << "\t" << conf_mat[3][2] << "\t" << conf_mat[3][3] << "\t" << conf_mat[3][4] << "\n";
+
     result_file.close();
 }
 
@@ -947,7 +987,8 @@ GTCloudsAndNumbers createGTforSceneComp(const std::map<std::string, std::map<std
 }
 
 
-std::vector<std::string> checkRemovedObjects(pcl::PointCloud<PointLabel>::Ptr removed_obj_cloud, const GTCloudsAndNumbers gt_cloud_numbers, std::map<std::string, int> &tp_class_object_count) {
+std::vector<std::string> checkRemovedObjects(pcl::PointCloud<PointLabel>::Ptr removed_obj_cloud, const GTCloudsAndNumbers gt_cloud_numbers,
+                                             std::map<std::string, int> &tp_class_object_count) {
     PointLabel nan_point;
     nan_point.x = nan_point.y = nan_point.z = std::numeric_limits<float>::quiet_NaN();
 
@@ -962,37 +1003,42 @@ std::vector<std::string> checkRemovedObjects(pcl::PointCloud<PointLabel>::Ptr re
         tree.setInputCloud(removed_obj_cloud);
 
         for (GTObject gt_obj : gt_cloud_numbers.ref_objects) {
-            bool is_obj_matched = false;
-            if (gt_obj.class_label == ObjectClass::REMOVED) {
-                for (size_t p = 0; p < gt_obj.object_cloud->size(); ++p) {
-                    const PointLabel &p_object = gt_obj.object_cloud->points[p];
-                    if (!pcl::isFinite(p_object))
-                        continue;
-                    if (tree.radiusSearch(p_object, search_radius, nn_indices, nn_distances) > 0){
-                        if (!is_obj_matched)
-                            ref_matched_removed.push_back(gt_obj.name);
-                        is_obj_matched = true;
-                        /// remove overlapping points (=correctly classified points) from the result cloud
-                        for (size_t k = 0; k < nn_indices.size(); k++) {
-                            removed_obj_cloud->points[nn_indices[k]] = nan_point;
+            //only objects that were counted as detected are checked if they are correctly categorized
+            if (gt_obj.is_detected) {
+                bool is_obj_matched = false;
+                if (gt_obj.class_label == ObjectClass::REMOVED) {
+                    for (size_t p = 0; p < gt_obj.object_cloud->size(); ++p) {
+                        const PointLabel &p_object = gt_obj.object_cloud->points[p];
+                        if (!pcl::isFinite(p_object))
+                            continue;
+                        if (tree.radiusSearch(p_object, search_radius, nn_indices, nn_distances) > 0){
+                            if (!is_obj_matched)
+                                ref_matched_removed.push_back(gt_obj.name);
+                            is_obj_matched = true;
+                            /// remove overlapping points (=correctly classified points) from the result cloud
+                            for (size_t k = 0; k < nn_indices.size(); k++) {
+                                removed_obj_cloud->points[nn_indices[k]] = nan_point;
+                            }
                         }
                     }
                 }
-            }
-            if (is_obj_matched) {
-                is_obj_matched = false;
-                std::map<std::string, int>::iterator it = tp_class_object_count.find(gt_obj.name);
-                if (it == tp_class_object_count.end())
-                    tp_class_object_count[gt_obj.name] = 1;
-                else
-                    tp_class_object_count[gt_obj.name] += 1;
+                if (is_obj_matched) {
+                    is_obj_matched = false;
+                    std::map<std::string, int>::iterator it = tp_class_object_count.find(gt_obj.name);
+                    if (it == tp_class_object_count.end())
+                        tp_class_object_count[gt_obj.name] = 1;
+                    else
+                        tp_class_object_count[gt_obj.name] += 1;
+                }
             }
         }
     }
+
     return ref_matched_removed;
 }
 
-std::vector<std::string> checkNovelObjects(pcl::PointCloud<PointLabel>::Ptr novel_obj_cloud, const GTCloudsAndNumbers gt_cloud_numbers, std::map<std::string, int> &tp_class_object_count) {
+std::vector<std::string> checkNovelObjects(pcl::PointCloud<PointLabel>::Ptr novel_obj_cloud, const GTCloudsAndNumbers gt_cloud_numbers,
+                                           std::map<std::string, int> &tp_class_object_count) {
     PointLabel nan_point;
     nan_point.x = nan_point.y = nan_point.z = std::numeric_limits<float>::quiet_NaN();
 
@@ -1006,32 +1052,35 @@ std::vector<std::string> checkNovelObjects(pcl::PointCloud<PointLabel>::Ptr nove
     if (!novel_obj_cloud->empty()) {
         tree.setInputCloud(novel_obj_cloud);
         for (GTObject gt_obj : gt_cloud_numbers.curr_objects) {
-            bool is_obj_matched = false;
-            if (gt_obj.class_label == ObjectClass::NEW) {
-                for (size_t p = 0; p < gt_obj.object_cloud->size(); ++p) {
-                    const PointLabel &p_object = gt_obj.object_cloud->points[p];
-                    if (!pcl::isFinite(p_object))
-                        continue;
-                    if (tree.radiusSearch(p_object, search_radius, nn_indices, nn_distances) > 0){
-                        if (!is_obj_matched)
-                            curr_matched_novel.push_back(gt_obj.name);
-                        is_obj_matched = true;
-                        /// remove overlapping points (=correctly classified points) from the result cloud
-                        for (size_t k = 0; k < nn_indices.size(); k++) {
-                            novel_obj_cloud->points[nn_indices[k]] = nan_point;
+            if (gt_obj.is_detected) {
+                bool is_obj_matched = false;
+                if (gt_obj.class_label == ObjectClass::NEW) {
+                    for (size_t p = 0; p < gt_obj.object_cloud->size(); ++p) {
+                        const PointLabel &p_object = gt_obj.object_cloud->points[p];
+                        if (!pcl::isFinite(p_object))
+                            continue;
+                        if (tree.radiusSearch(p_object, search_radius, nn_indices, nn_distances) > 0){
+                            if (!is_obj_matched)
+                                curr_matched_novel.push_back(gt_obj.name);
+                            is_obj_matched = true;
+                            /// remove overlapping points (=correctly classified points) from the result cloud
+                            for (size_t k = 0; k < nn_indices.size(); k++) {
+                                novel_obj_cloud->points[nn_indices[k]] = nan_point;
+                            }
                         }
                     }
                 }
-            }
-            if (is_obj_matched) {
-                is_obj_matched = false;
-                std::map<std::string, int>::iterator it = tp_class_object_count.find(gt_obj.name);
-                if (it == tp_class_object_count.end())
-                    tp_class_object_count[gt_obj.name] = 1;
-                else
-                    tp_class_object_count[gt_obj.name] += 1;
+                if (is_obj_matched) {
+                    is_obj_matched = false;
+                    std::map<std::string, int>::iterator it = tp_class_object_count.find(gt_obj.name);
+                    if (it == tp_class_object_count.end())
+                        tp_class_object_count[gt_obj.name] = 1;
+                    else
+                        tp_class_object_count[gt_obj.name] += 1;
+                }
             }
         }
+
         return curr_matched_novel;
     }
 }
@@ -1043,7 +1092,6 @@ std::tuple<std::vector<std::string>, std::vector<std::string>> checkDisplacedObj
     nan_point.x = nan_point.y = nan_point.z = std::numeric_limits<float>::quiet_NaN();
 
     /// create tree for radius search
-    pcl::KdTreeFLANN<PointLabel> tree;
     std::vector<int> nn_indices;
     std::vector<float> nn_distances;
     pcl::KdTreeFLANN<PointLabel> c_tree;
@@ -1057,108 +1105,332 @@ std::tuple<std::vector<std::string>, std::vector<std::string>> checkDisplacedObj
     std::vector<std::string> matched_static;
 
     for (GTObject gt_obj : gt_cloud_numbers.curr_objects) {
-        std::vector<int> c_overlapping_indices, r_overlapping_indices;
-        bool is_static=true;
-        if (gt_obj.class_label ==ObjectClass::REMOVED || gt_obj.class_label == ObjectClass::NEW) {
-            continue;
-        }
-        if (gt_obj.class_label >= 1000 && gt_obj.class_label <= 1950) { //MOVED
-            if (c_moved_obj_cloud->empty() || r_moved_obj_cloud->empty())
+        if (gt_obj.is_detected) {
+            std::vector<int> c_overlapping_indices, r_overlapping_indices;
+            bool is_static=true;
+            if (gt_obj.class_label ==ObjectClass::REMOVED || gt_obj.class_label == ObjectClass::NEW) {
                 continue;
-            c_cloud = c_moved_obj_cloud;
-            r_cloud = r_moved_obj_cloud;
-            is_static = false;
-        } else if (gt_obj.class_label >= 20 && gt_obj.class_label <= 950) { //STATIC
-            if (c_static_obj_cloud->empty() || r_static_obj_cloud->empty())
-                continue;
-            c_cloud = c_static_obj_cloud;
-            r_cloud = r_static_obj_cloud;
-            is_static = true;
-        } else {
-            std::cerr << "Something is wrong. This label should not exist!" << std::endl;
-        }
-        c_tree.setInputCloud(c_cloud);
-        r_tree.setInputCloud(r_cloud);
-
-        /// find the corresponding ref object
-        std::vector<GTObject>::const_iterator ref_it = find_if(gt_ref_objects.begin(), gt_ref_objects.end(),
-                                                               [gt_obj](const GTObject ref_obj){return gt_obj.class_label == ref_obj.class_label;});
-
-        //get overlapping points from current scene
-        for (size_t p = 0; p < gt_obj.object_cloud->size(); ++p) {
-            const PointLabel &p_object = gt_obj.object_cloud->points[p];
-            if (!pcl::isFinite(p_object))
-                continue;
-            if (c_tree.radiusSearch(p_object, search_radius, nn_indices, nn_distances) > 0){
-                c_overlapping_indices.insert(c_overlapping_indices.end(), nn_indices.begin(), nn_indices.end());
             }
-        }
-        //get overlapping points from reference scene
-        for (size_t p = 0; p < ref_it->object_cloud->size(); ++p) {
-            const PointLabel &p_object = ref_it->object_cloud->points[p];
-            if (!pcl::isFinite(p_object))
-                continue;
-            if (r_tree.radiusSearch(p_object, search_radius, nn_indices, nn_distances) > 0){
-                r_overlapping_indices.insert(r_overlapping_indices.end(), nn_indices.begin(), nn_indices.end());
+            if (categoryTransformer(gt_obj.class_label) == ObjectClass::MOVED) { //MOVED
+                if (c_moved_obj_cloud->empty() || r_moved_obj_cloud->empty())
+                    continue;
+                c_cloud = c_moved_obj_cloud;
+                r_cloud = r_moved_obj_cloud;
+                is_static = false;
+            } else if (categoryTransformer(gt_obj.class_label) == ObjectClass::STATIC) { //STATIC
+                if (c_static_obj_cloud->empty() || r_static_obj_cloud->empty())
+                    continue;
+                c_cloud = c_static_obj_cloud;
+                r_cloud = r_static_obj_cloud;
+                is_static = true;
+            } else {
+                std::cerr << "Something is wrong. This label should not exist!" << std::endl;
             }
-        }
+            c_tree.setInputCloud(c_cloud);
+            r_tree.setInputCloud(r_cloud);
 
-        //sort and remove double indices
-        std::sort(c_overlapping_indices.begin(), c_overlapping_indices.end());
-        c_overlapping_indices.erase(unique(c_overlapping_indices.begin(), c_overlapping_indices.end()), c_overlapping_indices.end());
-        std::sort(r_overlapping_indices.begin(), r_overlapping_indices.end());
-        r_overlapping_indices.erase(unique(r_overlapping_indices.begin(), r_overlapping_indices.end()), r_overlapping_indices.end());
+            /// find the corresponding ref object
+            std::vector<GTObject>::const_iterator ref_it = find_if(gt_ref_objects.begin(), gt_ref_objects.end(),
+                                                                   [gt_obj](const GTObject ref_obj){return gt_obj.class_label == ref_obj.class_label;});
+            if (ref_it->is_detected) {
+                //get overlapping points from current scene
+                for (size_t p = 0; p < gt_obj.object_cloud->size(); ++p) {
+                    const PointLabel &p_object = gt_obj.object_cloud->points[p];
+                    if (!pcl::isFinite(p_object))
+                        continue;
+                    if (c_tree.radiusSearch(p_object, search_radius, nn_indices, nn_distances) > 0){
+                        c_overlapping_indices.insert(c_overlapping_indices.end(), nn_indices.begin(), nn_indices.end());
+                    }
+                }
+                //get overlapping points from reference scene
+                for (size_t p = 0; p < ref_it->object_cloud->size(); ++p) {
+                    const PointLabel &p_object = ref_it->object_cloud->points[p];
+                    if (!pcl::isFinite(p_object))
+                        continue;
+                    if (r_tree.radiusSearch(p_object, search_radius, nn_indices, nn_distances) > 0){
+                        r_overlapping_indices.insert(r_overlapping_indices.end(), nn_indices.begin(), nn_indices.end());
+                    }
+                }
 
-        if (r_overlapping_indices.size() == 0 || c_overlapping_indices.size() == 0)
-            continue;
+                //sort and remove double indices
+                std::sort(c_overlapping_indices.begin(), c_overlapping_indices.end());
+                c_overlapping_indices.erase(unique(c_overlapping_indices.begin(), c_overlapping_indices.end()), c_overlapping_indices.end());
+                std::sort(r_overlapping_indices.begin(), r_overlapping_indices.end());
+                r_overlapping_indices.erase(unique(r_overlapping_indices.begin(), r_overlapping_indices.end()), r_overlapping_indices.end());
 
-        //find the label that is most often occuring in the overlap
-        std::vector<int> r_label_vec, c_label_vec;
-        for (auto p : r_overlapping_indices)
-            r_label_vec.push_back(r_cloud->points[p].label);
-        for (auto p : c_overlapping_indices)
-            c_label_vec.push_back(c_cloud->points[p].label);
-        int r_most_label = getMostFrequentNumber(r_label_vec);
-        int c_most_label = getMostFrequentNumber(c_label_vec);
+                if (r_overlapping_indices.size() == 0 || c_overlapping_indices.size() == 0)
+                    continue;
 
-        /// correct match
-        if (r_most_label == c_most_label) {
-            if (is_static) {
-                matched_static.push_back(gt_obj.name);
+                //find the label that is most often occuring in the overlap
+                std::vector<int> r_label_vec, c_label_vec;
+                for (auto p : r_overlapping_indices)
+                    r_label_vec.push_back(r_cloud->points[p].label);
+                for (auto p : c_overlapping_indices)
+                    c_label_vec.push_back(c_cloud->points[p].label);
+                int r_most_label = getMostFrequentNumber(r_label_vec);
+                int c_most_label = getMostFrequentNumber(c_label_vec);
+
+                /// correct match
+                if (r_most_label == c_most_label) {
+                    if (is_static) {
+                        matched_static.push_back(gt_obj.name);
+                    }
+                    else {
+                        matched_moved.push_back(gt_obj.name);
+                    }
+                    std::map<std::string, int>::iterator it = tp_class_object_count.find(gt_obj.name);
+                    if (it == tp_class_object_count.end())
+                        tp_class_object_count[gt_obj.name] = 2;
+                    else
+                        tp_class_object_count[gt_obj.name] += 2;
+
+                    //update the clouds and remove matched indices
+                    pcl::PointIndices::Ptr c_ind(new pcl::PointIndices());
+                    for (auto p : r_overlapping_indices) {
+                        if (r_cloud->points[p].label == r_most_label)
+                            c_ind->indices.push_back(p);
+                    }
+                    pcl::ExtractIndices<PointLabel> extract;
+                    extract.setInputCloud (r_cloud);
+                    extract.setIndices(c_ind);
+                    extract.setKeepOrganized(true);
+                    extract.setNegative (true);
+                    extract.filter(*r_cloud);
+
+                    c_ind.reset(new pcl::PointIndices());
+                    for (auto p : c_overlapping_indices) {
+                        if (c_cloud->points[p].label == r_most_label)
+                            c_ind->indices.push_back(p);
+                    }
+                    extract.setInputCloud (c_cloud);
+                    extract.setIndices(c_ind);
+                    extract.filter(*c_cloud);
+                }
             }
-            else {
-                matched_moved.push_back(gt_obj.name);
-            }
-            std::map<std::string, int>::iterator it = tp_class_object_count.find(gt_obj.name);
-            if (it == tp_class_object_count.end())
-                tp_class_object_count[gt_obj.name] = 2;
-            else
-                tp_class_object_count[gt_obj.name] += 2;
-
-            //update the clouds and remove matched indices
-            pcl::PointIndices::Ptr c_ind(new pcl::PointIndices());
-            for (auto p : r_overlapping_indices) {
-                if (r_cloud->points[p].label == r_most_label)
-                    c_ind->indices.push_back(p);
-            }
-            pcl::ExtractIndices<PointLabel> extract;
-            extract.setInputCloud (r_cloud);
-            extract.setIndices(c_ind);
-            extract.setKeepOrganized(true);
-            extract.setNegative (true);
-            extract.filter(*r_cloud);
-
-            c_ind.reset(new pcl::PointIndices());
-            for (auto p : c_overlapping_indices) {
-                if (c_cloud->points[p].label == r_most_label)
-                    c_ind->indices.push_back(p);
-            }
-            extract.setInputCloud (c_cloud);
-            extract.setIndices(c_ind);
-            extract.filter(*c_cloud);
         }
     }
     std::tuple<std::vector<std::string>, std::vector<std::string>> matched_objects;
     matched_objects = std::make_tuple(matched_static, matched_moved);
     return matched_objects;
+}
+
+int categoryTransformer(int cat_label) {
+    if (cat_label == 2)
+        return ObjectClass::REMOVED;
+
+    if (cat_label == 3)
+        return ObjectClass::NEW;
+
+    if (cat_label == 1 || (cat_label >= 1000 && cat_label <= 1950))  //MOVED
+        return ObjectClass::MOVED;
+
+    if (cat_label == 0 || (cat_label >= 20 && cat_label <= 950))  //STATIC
+        return ObjectClass::STATIC;
+}
+
+void computeConfusionMat(GTCloudsAndNumbers gt_objects, pcl::PointCloud<PointLabel>::Ptr ref_result_cloud,
+                         pcl::PointCloud<PointLabel>::Ptr curr_result_cloud, std::vector<std::vector<int>> &conf_mat) {
+    std::vector<int> indices;
+    pcl::PointCloud<PointLabel>::Ptr ref_cloud_wo_nans(new  pcl::PointCloud<PointLabel>);
+    pcl::removeNaNFromPointCloud(*ref_result_cloud, *ref_cloud_wo_nans, indices);
+    pcl::PointCloud<PointLabel>::Ptr curr_cloud_wo_nans(new  pcl::PointCloud<PointLabel>);
+    pcl::removeNaNFromPointCloud(*curr_result_cloud, *curr_cloud_wo_nans, indices);
+
+    pcl::octree::OctreePointCloudSearch<PointLabel> r_octree (0.2);
+    r_octree.setInputCloud (ref_cloud_wo_nans);
+    r_octree.addPointsFromInputCloud ();
+    pcl::octree::OctreePointCloudSearch<PointLabel> c_octree (0.2);
+    c_octree.setInputCloud (curr_cloud_wo_nans);
+    c_octree.addPointsFromInputCloud ();
+
+    for (GTObject obj : gt_objects.ref_objects) {
+        int obj_cat = categoryTransformer(obj.class_label);
+        std::vector<int> r_overlapping_ind;
+        std::vector<int> nn_indices;
+        std::vector<float> nn_distances;
+
+        for (size_t p = 0; p < obj.object_cloud->size(); ++p) {
+            const PointLabel &p_object = obj.object_cloud->points[p];
+            if (!pcl::isFinite(p_object))
+                continue;
+            if (r_octree.radiusSearch(p_object, search_radius, nn_indices, nn_distances) > 0){
+                r_overlapping_ind.insert(r_overlapping_ind.end(), nn_indices.begin(), nn_indices.end());
+            }
+        }
+        std::sort(r_overlapping_ind.begin(), r_overlapping_ind.end());
+        r_overlapping_ind.erase(std::unique( r_overlapping_ind.begin(), r_overlapping_ind.end() ), r_overlapping_ind.end() );
+
+        if (r_overlapping_ind.size() == 0)
+            continue;
+        std::vector<int> overlapping_labels;
+        for (size_t i = 0; i < r_overlapping_ind.size(); i++) {
+            int label = categoryTransformer(ref_cloud_wo_nans->points.at(r_overlapping_ind[i]).label);
+            overlapping_labels.push_back(label);
+        }
+
+        if (obj_cat == ObjectClass::REMOVED) {
+            int category = getMostFrequentNumber(overlapping_labels);
+            conf_mat[obj_cat][category] += 1;
+        }
+        else {
+            /// find the corresponding curr object
+            std::vector<GTObject>::const_iterator curr_it = find_if(gt_objects.curr_objects.begin(), gt_objects.curr_objects.end(),
+                                                                    [obj](const GTObject curr_obj){return obj.class_label == curr_obj.class_label;});
+
+            //get overlapping points from current scene
+            std::vector<int> c_overlapping_ind;
+            for (size_t p = 0; p < curr_it->object_cloud->size(); ++p) {
+                const PointLabel &p_object = curr_it->object_cloud->points[p];
+                if (!pcl::isFinite(p_object))
+                    continue;
+                if (c_octree.radiusSearch(p_object, search_radius, nn_indices, nn_distances) > 0){
+                    c_overlapping_ind.insert(c_overlapping_ind.end(), nn_indices.begin(), nn_indices.end());
+                }
+            }
+
+            //sort and remove double indices
+            std::sort(c_overlapping_ind.begin(), c_overlapping_ind.end());
+            c_overlapping_ind.erase(unique(c_overlapping_ind.begin(), c_overlapping_ind.end()), c_overlapping_ind.end());
+
+            if (c_overlapping_ind.size() == 0) {
+                int category = getMostFrequentNumber(overlapping_labels);
+                conf_mat[obj_cat][category] += 1;
+            }
+            else {
+
+                //find the label that is most often occuring in the overlap
+                std::vector<int> r_label_vec, c_label_vec;
+                for (auto p : r_overlapping_ind)
+                    r_label_vec.push_back(ref_cloud_wo_nans->points[p].label);
+                for (auto p : c_overlapping_ind)
+                    c_label_vec.push_back(curr_cloud_wo_nans->points[p].label);
+                int r_most_label = getMostFrequentNumber(r_label_vec);
+                int c_most_label = getMostFrequentNumber(c_label_vec);
+
+                int r_category = categoryTransformer(r_most_label);
+                int c_category = categoryTransformer(c_most_label);
+
+                if (r_category == c_category) {
+                    /// correct match
+                    if (r_most_label == c_most_label) {
+                        conf_mat[obj_cat][r_category] += 1;
+                        conf_mat[obj_cat][c_category] += 1;
+                    } else {
+                        conf_mat[obj_cat][4] += 2;
+                    }
+                } else {
+                    conf_mat[obj_cat][r_category] += 1;
+                    conf_mat[obj_cat][c_category] += 1;
+                }
+            }
+        }
+    }
+
+    for (GTObject obj : gt_objects.curr_objects) {
+        int obj_cat = categoryTransformer(obj.class_label);
+        if (obj_cat == ObjectClass::NEW) {
+            std::vector<int> c_overlapping_ind;
+            std::vector<int> nn_indices;
+            std::vector<float> nn_distances;
+
+            for (size_t p = 0; p < obj.object_cloud->size(); ++p) {
+                const PointLabel &p_object = obj.object_cloud->points[p];
+                if (!pcl::isFinite(p_object))
+                    continue;
+                if (c_octree.radiusSearch(p_object, 0.00001, nn_indices, nn_distances) > 0){
+                    c_overlapping_ind.insert(c_overlapping_ind.end(), nn_indices.begin(), nn_indices.end());
+                }
+            }
+            std::sort(c_overlapping_ind.begin(), c_overlapping_ind.end());
+            c_overlapping_ind.erase(std::unique( c_overlapping_ind.begin(), c_overlapping_ind.end() ), c_overlapping_ind.end() );
+
+            if (c_overlapping_ind.size() == 0)
+                continue;
+            std::vector<int> overlapping_labels;
+            for (size_t i = 0; i < c_overlapping_ind.size(); i++) {
+                int label = categoryTransformer(curr_cloud_wo_nans->points.at(c_overlapping_ind[i]).label);
+                overlapping_labels.push_back(label);
+            }
+
+            int category = getMostFrequentNumber(overlapping_labels);
+            conf_mat[obj_cat][category] += 1;
+        }
+    }
+}
+
+/*void computeConfusionMat(std::vector<GTObject> gt_objects, pcl::PointCloud<PointLabel>::Ptr result_cloud, std::vector<std::vector<int>> &conf_mat) {
+    std::vector<int> indices;
+    pcl::PointCloud<PointLabel>::Ptr cloud_wo_nans(new  pcl::PointCloud<PointLabel>);
+    pcl::removeNaNFromPointCloud(*result_cloud, *cloud_wo_nans, indices);
+
+    pcl::octree::OctreePointCloudSearch<PointLabel> octree (0.2);
+    octree.setInputCloud (cloud_wo_nans);
+    octree.addPointsFromInputCloud ();
+
+    for (GTObject obj : gt_objects) {
+        std::vector<int> overlapping_ind;
+        std::vector<int> nn_indices;
+        std::vector<float> nn_distances;
+
+        for (size_t p = 0; p < obj.object_cloud->size(); ++p) {
+            const PointLabel &p_object = obj.object_cloud->points[p];
+            if (!pcl::isFinite(p_object))
+                continue;
+            if (octree.radiusSearch(p_object, 0.00001, nn_indices, nn_distances) > 0){
+                overlapping_ind.insert(overlapping_ind.end(), nn_indices.begin(), nn_indices.end());
+            }
+        }
+        std::sort(overlapping_ind.begin(), overlapping_ind.end());
+        overlapping_ind.erase(std::unique( overlapping_ind.begin(), overlapping_ind.end() ), overlapping_ind.end() );
+
+        if (overlapping_ind.size() == 0)
+            continue;
+        std::vector<int> overlapping_labels;
+        for (size_t i = 0; i < overlapping_ind.size(); i++) {
+            int label = categoryTransformer(cloud_wo_nans->points.at(overlapping_ind[i]).label);
+            overlapping_labels.push_back(label);
+        }
+        int category = getMostFrequentNumber(overlapping_labels);
+        conf_mat[categoryTransformer(obj.class_label)][category] += 1;
+    }
+}*/
+
+//relabel static and moved objects to be in the range 20-950 resp. 1000-1950
+void relabelMatches(pcl::PointCloud<PointLabel>::Ptr ref_cloud, pcl::PointCloud<PointLabel>::Ptr curr_cloud, bool isStatic) {
+    std::set<int> available_labels;
+    for (PointLabel p : ref_cloud->points) {
+        available_labels.insert(p.label);
+    }
+
+    std::set<int> label_check;
+    for (PointLabel p : curr_cloud->points) {
+        if (available_labels.find(p.label) == available_labels.end()) {
+            std::cout << "Found a label in the current cloud that was not in the ref cloud!" << std::endl;
+            exit(-1);
+        }
+        label_check.insert(p.label);
+    }
+
+    if (available_labels.size() != label_check.size()) {
+        std::cout << "The number of matched objects in ref and curr is different!" << std::endl;
+        exit(-1);
+    }
+
+    int new_label;
+    if (isStatic)
+        new_label = 20;
+    else
+        new_label = 1000;
+
+    for (int label : available_labels) {
+        for (PointLabel &p : ref_cloud->points) {
+            if (p.label == label)
+                p.label = new_label;
+        }
+        for (PointLabel &p : curr_cloud->points) {
+            if (p.label == label)
+                p.label = new_label;
+        }
+        new_label += 10;
+    }
 }

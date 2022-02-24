@@ -188,6 +188,9 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
             if (isObjectUnwanted(ds_cloud, min_object_volume, min_object_size_ds, std::numeric_limits<int>::max(), 0.01, 0.9))
                 model_diff_cloud->clear();
 
+            //the part that is matched
+            pcl::PointCloud<PointNormal>::Ptr matched_model_part(new pcl::PointCloud<PointNormal>);
+
             //nothing is left of the diff --> the whole model cluster is a match
             if (model_diff_cloud->size() == 0 ) { //we do not split the model object
                 ro_iter->match_ = match;
@@ -195,22 +198,21 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
             }
             //split the model cloud
             else {
-                //the part that is matched
-                pcl::PointCloud<PointNormal>::Ptr matched_model_part(new pcl::PointCloud<PointNormal>);
+
                 model_diff_cloud.reset(new pcl::PointCloud<PointNormal>);
                 matchedPartGrowing(model_aligned, matched_model_part, model_diff_cloud, match.fitness_score.model_overlapping_pts);
 
 //                //re-compute fitness for the splitted part
 //                match.fitness_score = computeModelFitness(object_cloud, matched_model_part, ppf_params);
 
+//                if (isBelowPlane(matched_model_part, co_iter->plane_cloud_)) {
+//                    invalid_matches[co_iter->getID()].push_back(ro_iter->getID());
+//                    continue;
+//                }
+
                 //transform back to original scene
                 pcl::transformPointCloudWithNormals(*matched_model_part, *matched_model_part, match.transform.inverse());
                 pcl::transformPointCloudWithNormals(*model_diff_cloud, *model_diff_cloud, match.transform.inverse());
-
-                //the matched part of the model
-                ro_iter->setObjectCloud(matched_model_part);
-                ro_iter->match_ = match;
-                ro_iter->object_folder_path_="";
 
                 //we add the diff_model_part later to the model_vec because it invalidates the vector
             }
@@ -247,6 +249,12 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
 //                //re-compute fitness for the splitted part
 //                match.fitness_score = computeModelFitness(matched_object_part, model_aligned, ppf_params);
 
+                pcl::PointCloud<PointNormal>::Ptr object_aligned(new pcl::PointCloud<PointNormal>());
+                pcl::transformPointCloudWithNormals(*matched_object_part, *object_aligned, match.transform.inverse());
+//                if (isBelowPlane(object_aligned, ro_iter->plane_cloud_)) {
+//                    invalid_matches[co_iter->getID()].push_back(ro_iter->getID());
+//                    continue;
+//                }
 
                 //the matched part of the object
                 co_iter->setObjectCloud(matched_object_part);
@@ -268,6 +276,16 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
                 //pcl::io::savePCDFile("/home/edith/object_remaining.pcd", *object_diff_cloud);
             }
 
+
+
+            //UPDATE THE MODEL
+            if (matched_model_part->size() > 0) {
+                //the matched part of the model
+                ro_iter->setObjectCloud(matched_model_part);
+                ro_iter->match_ = match;
+                ro_iter->object_folder_path_="";
+            }
+
             //recompute fitness, otherwise overlapping_point_ids do not match with the stored cloud
             pcl::transformPointCloudWithNormals(*(ro_iter->getObjectCloud()), *model_aligned, match.transform);
             FitnessScoreStruct f = computeModelFitness(co_iter->getObjectCloud(), model_aligned, ppf_params);
@@ -280,7 +298,6 @@ std::vector<Match> ObjectMatching::compute(std::vector<DetectedObject> &ref_resu
             bool is_static = dist < max_dist_for_being_static;
             ro_iter->state_ =(is_static ? ObjectState::STATIC : ObjectState::DISPLACED);
             co_iter->state_ = (is_static ? ObjectState::STATIC : ObjectState::DISPLACED);
-
 
             //ATTENTION: The ro_iter is invalid now because of the push_back. Vector re-allocates and invalidates pointers
             if (model_diff_cloud->size() > 0) {
@@ -378,13 +395,22 @@ std::vector<Match> ObjectMatching::weightedGraphMatching(std::vector<ObjectHypot
     std::map<std::string, vertex_t> modelToVertex;
 
     for (size_t o = 0; o < global_hypotheses.size(); o++) {
-        std::string obj_vert_name= std::to_string(global_hypotheses[o].object_id)+"_object"; //make sure the vertex identifier is different from the model identifier (e.g. 2_mug)
+        int object_id = global_hypotheses[o].object_id;
+        std::string obj_vert_name= std::to_string(object_id)+"_object"; //make sure the vertex identifier is different from the model identifier (e.g. 2_mug)
 
         auto obj_vertex = boost::add_vertex(VertexProperty(obj_vert_name),g);
 
         const std::map<int, HypothesesStruct> &hypos = global_hypotheses[o].model_hyp;
         for (std::map<int, HypothesesStruct>::const_iterator it=hypos.begin(); it!=hypos.end(); ++it) {
             const HypothesesStruct h = it->second;
+            //was this match used before unsuccessfully?
+            if (invalid_matches.end() != invalid_matches.find(object_id)) {
+                std::vector<int> unsuccessful_model_ids = invalid_matches[object_id];
+                if (unsuccessful_model_ids.end() != std::find (unsuccessful_model_ids.begin(), unsuccessful_model_ids.end(), h.model_id))
+                    continue;
+            }
+
+
             std::string model_vert_name = std::to_string(h.model_id)+"_model";
             vertex_t model_vertex;
             if (modelToVertex.find(model_vert_name) == modelToVertex.end()) { //insert vertex into graph

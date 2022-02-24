@@ -317,18 +317,17 @@ void ChangeDetection::compute(std::vector<DetectedObject> &ref_result, std::vect
         return;
     }
 
-    //TODO isn't ref_result and curr_result empty at this point?
-    mergeObjectParts(ref_result, merge_object_parts_path_);
-    mergeObjectParts(curr_result, merge_object_parts_path_);
+    mergeObjectParts(ref_obj_vec, merge_object_parts_path_);
+    mergeObjectParts(curr_obj_vec, merge_object_parts_path_);
 
-    filterUnwantedObjects(ref_result, min_object_volume, min_object_size_ds);
-    filterUnwantedObjects(curr_result, min_object_volume, min_object_size_ds);
+    filterUnwantedObjects(ref_obj_vec, min_object_volume, min_object_size_ds);
+    filterUnwantedObjects(curr_obj_vec, min_object_volume, min_object_size_ds);
 
     //matches between same plane different timestamps
     ObjectMatching object_matching(ref_obj_vec, curr_obj_vec, ppf_model_path_, ppf_config_path_);
     std::vector<Match> matches = object_matching.compute(ref_result, curr_result);
 
-    //region growing of static/displaced objects (should create more precise results if e.g. the model was smaller than die object or not precisely aligned
+    //region growing of static/displaced objects (should create more precise results if e.g. the model was smaller than the object or not precisely aligned)
     mergeObjectParts(ref_result, merge_object_parts_path_);
     mergeObjectParts(curr_result, merge_object_parts_path_);
     filterUnwantedObjects(ref_result, min_object_volume, min_object_size_ds);
@@ -1467,62 +1466,39 @@ void ChangeDetection::performLV(std::vector<DetectedObject> &ref_objects, std::v
                 //remove element in object vector
                 if (lv_result.is_matched) {
                     //full match reference
-                    if (lv_result.model_non_matching_pts.size() == 0) {
+                    if(lv_result.model_non_matching_cloud->empty()) {
                         ro_it->state_ = ObjectState::STATIC;
                         ref_obj_static.push_back(*ro_it);
-                        //ref_obj_static.push_back(*ro_it);
                         ro_it = ref_objects.erase(ro_it);
                     }
                     //extract matched  points if LV was successfull
                     else {
                         pcl::PointCloud<PointNormal>::Ptr matched_cloud(new pcl::PointCloud<PointNormal>);
-                        pcl::ExtractIndices<PointNormal> extract;
-                        extract.setInputCloud (ref_obj_cloud);
-                        pcl::PointIndices::Ptr ind (new pcl::PointIndices);
-                        ind->indices = lv_result.model_non_matching_pts;
-                        extract.setIndices (ind);
-                        extract.setKeepOrganized(false);
-                        extract.setNegative (true);
-                        extract.filter (*matched_cloud);
-
+                        pcl::copyPointCloud(*lv_result.model_matching_cloud, *matched_cloud);
                         DetectedObject obj(matched_cloud, ro_it->plane_cloud_, ro_it->plane_coeffs_, ObjectState::STATIC);
                         ref_obj_static.push_back(obj);
 
                         pcl::PointCloud<PointNormal>::Ptr remaining_cloud(new pcl::PointCloud<PointNormal>);
-                        extract.setNegative(false);
-                        extract.filter (*remaining_cloud);
-
+                        pcl::copyPointCloud(*lv_result.model_non_matching_cloud, *remaining_cloud);
                         ro_it->setObjectCloud(remaining_cloud);
                         ro_it++;
                     }
 
-                    if (lv_result.obj_non_matching_pts.size() == 0) {
+                    if(lv_result.obj_non_matching_cloud->empty()) {
                         co_it->state_ = ObjectState::STATIC;
                         curr_obj_static.push_back(*co_it);
-
-                        //curr_obj_static.push_back(*co_it);
                         co_it = curr_objects.erase(co_it);
                         erased_co_elem = true;
                         //break; //if we break, the match will be not assigned to the objects
                     } else {
                         //extract matched  points
                         pcl::PointCloud<PointNormal>::Ptr matched_cloud(new pcl::PointCloud<PointNormal>);
-                        pcl::ExtractIndices<PointNormal> extract;
-                        extract.setInputCloud (curr_obj_cloud);
-                        pcl::PointIndices::Ptr ind (new pcl::PointIndices);
-                        ind->indices = lv_result.obj_non_matching_pts;
-                        extract.setIndices (ind);
-                        extract.setKeepOrganized(false);
-                        extract.setNegative (true);
-                        extract.filter (*matched_cloud);
-
+                        pcl::copyPointCloud(*lv_result.obj_matching_cloud, *matched_cloud);
                         DetectedObject obj(matched_cloud, co_it->plane_cloud_, co_it->plane_coeffs_, ObjectState::STATIC);
                         curr_obj_static.push_back(obj);
 
                         pcl::PointCloud<PointNormal>::Ptr remaining_cloud(new pcl::PointCloud<PointNormal>);
-                        extract.setNegative(false);
-                        extract.filter (*remaining_cloud);
-
+                        pcl::copyPointCloud(*lv_result.obj_non_matching_cloud, *remaining_cloud);
                         co_it->setObjectCloud(remaining_cloud);
                         curr_obj_cloud = remaining_cloud;
                     }

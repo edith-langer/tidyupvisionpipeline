@@ -1,5 +1,5 @@
 #!/bin/bash
-
+#| sort -n | tail -5 | head -1 --> runs evaluation for the 5th last folder
 last_Arena_folder=$(printf "%s\n" /home/edith/liebnas_mnt/PlaneReconstructions/Results/Arena/*  | tail -1)
 last_KennyLab_folder=$(printf "%s\n" /home/edith/liebnas_mnt/PlaneReconstructions/Results/KennyLab/*  | tail -1)
 last_GH30_living_folder=$(printf "%s\n" /home/edith/liebnas_mnt/PlaneReconstructions/Results/GH30_living/*  | tail -1)

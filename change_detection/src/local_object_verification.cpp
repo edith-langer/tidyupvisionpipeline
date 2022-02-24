@@ -140,7 +140,7 @@ LVResult LocalObjectVerification::computeLV() {
             }
 
             if (isObjectUnwanted(ref_diff_cloud, min_object_volume, min_object_size_ds, std::numeric_limits<int>::max(), 0.01, 0.9)) { //if less than 100 points left, we do not split the ref object
-                result.model_non_matching_pts = std::vector<int>{};
+                result.model_non_matching_cloud = pcl::PointCloud<PointNormal>::Ptr(new pcl::PointCloud<PointNormal>());
             }
 
 
@@ -148,23 +148,15 @@ LVResult LocalObjectVerification::computeLV() {
             else {
                 //the part that is matched
                 pcl::PointCloud<PointNormal>::Ptr matched_ref_part(new pcl::PointCloud<PointNormal>);
-                pcl::ExtractIndices<PointNormal> extract;
-                extract.setInputCloud (ref_object_noNans);
-                pcl::PointIndices::Ptr c_ind(new pcl::PointIndices());
-                c_ind->indices = diff_ind;
-                extract.setIndices(c_ind);
-                extract.setKeepOrganized(false);
-                extract.setNegative (true);
-                extract.filter(*matched_ref_part);
+                ObjectMatching::matchedPartGrowing(ref_object_noNans, matched_ref_part, ref_diff_cloud, fitness_score.model_overlapping_pts);
 
-                pcl::io::savePCDFileBinary(debug_output_path + "/ref_object_partial_match.pcd", *matched_ref_part);
-                pcl::io::savePCDFileBinary(debug_output_path + "/ref_object_diff.pcd", *ref_diff_cloud);
+                if (!matched_ref_part->empty())
+                    pcl::io::savePCDFileBinary(debug_output_path + "/ref_object_partial_match.pcd", *matched_ref_part);
+                if (!ref_diff_cloud->empty())
+                    pcl::io::savePCDFileBinary(debug_output_path + "/ref_object_diff.pcd", *ref_diff_cloud);
 
-                //tranform non matchting points back to orig ind
-                std::vector<int> ref_orig_ind;
-                for (size_t i = 0; i < diff_ind.size(); i++)
-                    ref_orig_ind.push_back(ref_nan[diff_ind[i]]);
-                result.model_non_matching_pts = ref_orig_ind;
+                result.model_matching_cloud = matched_ref_part;
+                result.model_non_matching_cloud = ref_diff_cloud;
             }
 
             diff_ind.clear(); corresponding_ind.clear();
@@ -178,48 +170,36 @@ LVResult LocalObjectVerification::computeLV() {
                 diff_ind.erase(diff_ind.begin() + small_cluster_ind[i]);
             }
             if (isObjectUnwanted(curr_diff_cloud, min_object_volume, min_object_size_ds, std::numeric_limits<int>::max(), 0.01, 0.9)) { //if less than 100 points left, we do not split the ref object
-                result.obj_non_matching_pts = std::vector<int>{};
+                //result.obj_non_matching_pts = std::vector<int>{};
+                result.obj_non_matching_cloud = pcl::PointCloud<PointNormal>::Ptr(new pcl::PointCloud<PointNormal>());
             }
             //split the curr object cloud
             else {
                 //the part that is matched
                 pcl::PointCloud<PointNormal>::Ptr matched_curr_part(new pcl::PointCloud<PointNormal>);
-                pcl::ExtractIndices<PointNormal> extract;
-                extract.setInputCloud (curr_object_registered);
-                pcl::PointIndices::Ptr c_ind(new pcl::PointIndices());
-                c_ind->indices = diff_ind;
-                extract.setIndices(c_ind);
-                extract.setKeepOrganized(false);
-                extract.setNegative (true);
-                extract.filter(*matched_curr_part);
+                ObjectMatching::matchedPartGrowing(curr_object_registered, matched_curr_part, curr_diff_cloud, fitness_score.model_overlapping_pts);
+
                 //transform back to original scene
                 pcl::transformPointCloudWithNormals(*matched_curr_part, *matched_curr_part, icp.getFinalTransformation().inverse());
                 pcl::transformPointCloudWithNormals(*curr_diff_cloud, *curr_diff_cloud, icp.getFinalTransformation().inverse());
 
-                pcl::io::savePCDFileBinary(debug_output_path + "/curr_object_partial_match.pcd", *matched_curr_part);
-                pcl::io::savePCDFileBinary(debug_output_path + "/curr_object_diff.pcd", *curr_diff_cloud);
+                if (!matched_curr_part->empty())
+                    pcl::io::savePCDFileBinary(debug_output_path + "/curr_object_partial_match.pcd", *matched_curr_part);
+                if (!curr_diff_cloud->empty())
+                    pcl::io::savePCDFileBinary(debug_output_path + "/curr_object_diff.pcd", *curr_diff_cloud);
 
-                //transform non matching points back to orig ind
-                std::vector<int> curr_orig_ind;
-                for (size_t i = 0; i < diff_ind.size(); i++)
-                    curr_orig_ind.push_back(curr_nan[diff_ind[i]]);
-                result.obj_non_matching_pts = curr_orig_ind;
+                result.obj_matching_cloud = matched_curr_part;
+                result.obj_non_matching_cloud = curr_diff_cloud;
             }
             result.is_matched=true;
             return result;
         }
     }
-    //tranform back to orig ind
-    std::vector<int> ref_orig_ind;
-    for (size_t i = 0; i < ref_nan.size(); i++)
-        ref_orig_ind.push_back(ref_nan[i]);
-    result.model_non_matching_pts = ref_orig_ind;
 
-    //tranform back to orig ind
-    std::vector<int> curr_orig_ind;
-    for (size_t i = 0; i < curr_nan.size(); i++)
-        curr_orig_ind.push_back(curr_nan[i]);
-    result.obj_non_matching_pts = curr_orig_ind;
+    result.obj_matching_cloud = pcl::PointCloud<PointNormal>::Ptr(new pcl::PointCloud<PointNormal>());
+    result.obj_non_matching_cloud = pcl::PointCloud<PointNormal>::Ptr(new pcl::PointCloud<PointNormal>());
+    result.model_matching_cloud = pcl::PointCloud<PointNormal>::Ptr(new pcl::PointCloud<PointNormal>());
+    result.model_non_matching_cloud = pcl::PointCloud<PointNormal>::Ptr(new pcl::PointCloud<PointNormal>());
 
     result.transform_obj_to_model = Eigen::Matrix4f::Identity();
     result.is_matched = false;

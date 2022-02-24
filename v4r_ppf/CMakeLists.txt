@@ -11,6 +11,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED on)
 set(CMAKE_BUILD_TYPE Release)
 set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
+set(CMAKE_VERBOSE_MAKEFILE ON)
+
 ## add self defined find scripts to cmake module path
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
@@ -59,6 +61,9 @@ find_package(glog 0.4.0 REQUIRED)
 find_package(OpenMP REQUIRED)
 
 find_package(OpenCV 3 REQUIRED)
+
+## add subdirectories
+add_subdirectory(3rdparty/pcl_1_8) # v4r depends on 3rdparty/pcl_1_8 so this probably needs to be done before defining the targets
 
 
 ## collect include and source files
@@ -130,8 +135,6 @@ target_link_libraries(test_ppf_recognizer
 )
 
 
-## add subdirectories
-add_subdirectory(3rdparty/pcl_1_8) # v4r depends on 3rdparty/pcl_1_8 so this probably needs to be done before defining the targets
 
 ## install targets / define export set for exporting from build tree
 include(GNUInstallDirs)
