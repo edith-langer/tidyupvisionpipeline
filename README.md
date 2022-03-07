@@ -17,4 +17,4 @@ This method works independently of available training sets and is therefore suit
 For a more detailed description please checkout the paper. 
 
 
-
+The code for the baseline can be found here https://github.com/edith-langer/3DObjectMap_Categorization_Baseline
