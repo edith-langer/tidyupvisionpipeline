@@ -18,3 +18,4 @@ For a more detailed description please checkout the paper.
 
 
 The code for the baseline can be found here https://github.com/edith-langer/3DObjectMap_Categorization_Baseline
+The code for the robotic system can be found here https://github.com/Sasha-ObjectMatching-Pipeline
